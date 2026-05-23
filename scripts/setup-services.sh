@@ -55,11 +55,11 @@ wait_for_emqx() {
   done
 }
 
-wait_for_flink() {
+wait_for_spark() {
   local deadline=$((SECONDS + 180))
-  until curl -fsS http://localhost:8081/overview >/dev/null 2>&1; do
+  until curl -fsS http://localhost:8080/json/ >/dev/null 2>&1; do
     if ((SECONDS >= deadline)); then
-      echo "Timed out waiting for Flink JobManager" >&2
+      echo "Timed out waiting for Spark master" >&2
       return 1
     fi
     sleep 2
@@ -72,18 +72,18 @@ cd "$ROOT_DIR"
 
 if [[ "$BUILD_IMAGE" == "1" || "$BUILD_IMAGE" == "true" ]]; then
   mvn -q -DskipTests package
-  docker build -t thesis-topk:local "$ROOT_DIR"
+  docker build -t thesis-topk-spark:local "$ROOT_DIR"
 fi
 
 if [[ "$RESET" == "1" || "$RESET" == "true" ]]; then
   docker compose -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
 fi
 
-docker compose -f "$COMPOSE_FILE" up -d kafka emqx flink-jobmanager flink-taskmanager
+docker compose -f "$COMPOSE_FILE" up -d kafka emqx spark-master spark-worker
 wait_for_kafka
 wait_for_tcp 127.0.0.1 18884
 wait_for_emqx
-wait_for_flink
+wait_for_spark
 
 IFS=',' read -ra mappings <<<"$TOPIC_MAPPINGS"
 for mapping in "${mappings[@]}"; do
@@ -100,5 +100,5 @@ done
 
 TOPIC_MAPPINGS="$TOPIC_MAPPINGS" "$ROOT_DIR/scripts/configure-emqx.sh"
 
-echo "Services are ready:"
+echo "Spark, Kafka, and EMQX services are ready:"
 docker compose -f "$COMPOSE_FILE" ps

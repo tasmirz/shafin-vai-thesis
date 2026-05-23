@@ -77,7 +77,7 @@ public final class SparkTopKEngine {
     long queryInstanceCount = queryInstances.count();
     if (queryInstanceCount == 0) {
       queryInstances.unpersist();
-      return new QueryRanking(queryPoint.queryId(), List.of(), 0, 0, 0, 0.0, 0L);
+      return new QueryRanking(queryPoint.queryId(), new ArrayList<>(), 0, 0, 0, 0.0, 0L);
     }
 
     List<ProbabilisticInstance> allForQuery = queryInstances.collect();
@@ -166,29 +166,84 @@ public final class SparkTopKEngine {
     return values;
   }
 
-  private record CandidateEnvelope(
-      String objectId,
-      List<ProbabilisticInstance> instances,
-      double lowerBound,
-      double upperBound) implements Serializable {
+  private static final class CandidateEnvelope implements Serializable {
+    private final String objectId;
+    private final List<ProbabilisticInstance> instances;
+    private final double lowerBound;
+    private final double upperBound;
+
+    CandidateEnvelope(
+        String objectId,
+        List<ProbabilisticInstance> instances,
+        double lowerBound,
+        double upperBound) {
+      this.objectId = objectId;
+      this.instances = instances;
+      this.lowerBound = lowerBound;
+      this.upperBound = upperBound;
+    }
+
+    String objectId() { return objectId; }
+    List<ProbabilisticInstance> instances() { return instances; }
+    double lowerBound() { return lowerBound; }
+    double upperBound() { return upperBound; }
   }
 
-  public record QueryRanking(
-      String queryId,
-      List<CandidateScore> topK,
-      long objectCount,
-      long refinedCount,
-      long prunedCount,
-      double pruningThreshold,
-      long compactShuffleRecords) implements Serializable {
+  public static final class QueryRanking implements Serializable {
+    private final String queryId;
+    private final List<CandidateScore> topK;
+    private final long objectCount;
+    private final long refinedCount;
+    private final long prunedCount;
+    private final double pruningThreshold;
+    private final long compactShuffleRecords;
+
+    public QueryRanking(
+        String queryId,
+        List<CandidateScore> topK,
+        long objectCount,
+        long refinedCount,
+        long prunedCount,
+        double pruningThreshold,
+        long compactShuffleRecords) {
+      this.queryId = queryId;
+      this.topK = topK;
+      this.objectCount = objectCount;
+      this.refinedCount = refinedCount;
+      this.prunedCount = prunedCount;
+      this.pruningThreshold = pruningThreshold;
+      this.compactShuffleRecords = compactShuffleRecords;
+    }
+
+    public String queryId() { return queryId; }
+    public List<CandidateScore> topK() { return topK; }
+    public long objectCount() { return objectCount; }
+    public long refinedCount() { return refinedCount; }
+    public long prunedCount() { return prunedCount; }
+    public double pruningThreshold() { return pruningThreshold; }
+    public long compactShuffleRecords() { return compactShuffleRecords; }
+
     public double pruneRatio() {
       return objectCount == 0L ? 0.0 : (double) prunedCount / objectCount;
     }
   }
 
-  public record SparkRunResult(
-      long rawEventCount,
-      long probabilisticInstanceCount,
-      List<QueryRanking> rankings) implements Serializable {
+  public static final class SparkRunResult implements Serializable {
+    private final long rawEventCount;
+    private final long probabilisticInstanceCount;
+    private final List<QueryRanking> rankings;
+
+    public SparkRunResult(
+        long rawEventCount,
+        long probabilisticInstanceCount,
+        List<QueryRanking> rankings) {
+      this.rawEventCount = rawEventCount;
+      this.probabilisticInstanceCount = probabilisticInstanceCount;
+      this.rankings = rankings;
+    }
+
+    public long rawEventCount() { return rawEventCount; }
+    public long probabilisticInstanceCount() { return probabilisticInstanceCount; }
+    public List<QueryRanking> rankings() { return rankings; }
   }
 }

@@ -1,50 +1,38 @@
-# Apache Spark Upgrade Report
+# Spark Upgrade Implementation Report
 
-## Scope
+The project has been upgraded so Spark is used across the application, Docker Compose, Kubernetes, scripts, validation, and monitoring layers.
 
-This upgrade converts the project from a Flink-first prototype into a Spark-first implementation for the 2025 ICCIT probabilistic top-k dominating-query direction. The original paper uses a Hadoop MapReduce framing for filtering, pruning, shuffle emission, and refinement. The upgraded project keeps the paper-level PTD workflow but implements the distributed execution path with Apache Spark RDDs.
+## What Changed
 
-## Spark Components Added
+1. `Dockerfile` and `Dockerfile.spark` now build a Spark runtime image from `apache/spark:3.5.3`.
+2. `docker-compose.e2e.yml` now starts Kafka, EMQX, Spark master, Spark worker, and a profile-based Spark submit service.
+3. `k8s/pipeline.yaml` replaces Flink JobManager/TaskManager resources with Spark master/worker deployments and a `spark-topk-submit` job.
+4. `ProbabilisticTopKSparkJob` now supports both generated simulator input and bounded Kafka input.
+5. `scripts/setup-services.sh`, `scripts/e2e-benchmark.sh`, `scripts/validate-e2e.py`, `scripts/test-all.sh`, and `scripts/monitor.py` were updated for Spark names, logs, and metrics.
+6. `Justfile` recipes now build and submit Spark by default.
 
-- `com.thesis.topk.spark.SparkTopKEngine`
-  - Parallelizes raw uncertain events as Spark RDD partitions.
-  - Expands incomplete records into probabilistic instances using the existing DD-style synopsis imputation.
-  - Groups instances by query and object.
-  - Computes object-level lower and upper candidate bounds.
-  - Applies DSCP-style threshold pruning using the kth-largest lower bound.
-  - Refines only surviving objects using exact dynamic-dominance scoring.
-  - Emits top-k results per query.
-
-- `com.thesis.topk.spark.ProbabilisticTopKSparkJob`
-  - Provides a runnable Spark entry point.
-  - Supports `--sparkMaster=local[*]` by default and can be pointed to a Spark cluster master.
-  - Reports raw event count, probabilistic instance count, pruned/refined object counts, DSCP threshold, compact shuffle-record proxy, and final top-k objects.
-
-## Paper Alignment
-
-| Paper idea | Spark upgrade implementation |
-| --- | --- |
-| Uncertain objects and probabilistic instances | Raw events are imputed into weighted `ProbabilisticInstance` records. |
-| Dynamic dominance relative to a query point | Existing `DominanceScorer.dynamicallyDominates` is reused inside Spark refinement. |
-| Lower/upper bound filtering | Spark computes candidate envelopes per object. |
-| DSCP | Spark broadcasts the kth-largest lower-bound threshold and filters objects whose upper bound is too weak. |
-| AES | Spark shuffles compact object groups instead of repeated instance-competitor records. |
-| Exact top-k semantics after pruning | Survivors are refined with exact expected dominance scoring before collecting top-k. |
-
-## How to Run
+## Main Commands
 
 ```bash
 just spark
+just image
+just setup
+just spark-submit
+just e2e
+just validate
+just k8s-apply
+just k8s-logs
 ```
 
-or directly:
+## Output Files
 
-```bash
-mvn -q -DskipTests compile exec:java \
-  -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
-  -Dexec.args="--dataset=synthetic --objects=200 --queries=2 --dimensions=4 --k=5 --partitions=4 --sparkMaster=local[*]"
+```text
+reports/e2e/spark.log
+reports/e2e/spark-submit.log
+reports/e2e/summary.md
+reports/e2e/summary.csv
 ```
 
-## Notes
+## Remaining Legacy Code
 
-The older Flink/Kafka files are left in place so previous E2E scripts remain inspectable. The required upgraded path is the Spark entry point above.
+The `src/main/java/com/thesis/topk/flink` package and older Flink reports are retained for comparison only. The runtime path is Spark-first.

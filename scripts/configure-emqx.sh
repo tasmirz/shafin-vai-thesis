@@ -50,6 +50,22 @@ delete_if_exists() {
 
 echo "Configuring EMQX Kafka ingress via HTTP API at $EMQX_URL"
 
+slug() {
+  echo "$1" | tr '/.' '__' | tr -cd '[:alnum:]_'
+}
+
+IFS=',' read -ra mappings <<<"$TOPIC_MAPPINGS"
+for mapping in "${mappings[@]}"; do
+  mqtt="${mapping%%=*}"
+  kafka="${mapping#*=}"
+  suffix="$(slug "$mqtt")"
+  action_name="${ACTION_NAME_PREFIX}_${suffix}"
+  rule_id="${RULE_ID_PREFIX}_${suffix}"
+
+  delete_if_exists "/api/v5/rules/$rule_id"
+  delete_if_exists "/api/v5/actions/kafka_producer:$action_name"
+done
+
 delete_if_exists "/api/v5/connectors/kafka_producer:$CONNECTOR_NAME"
 
 connector_payload="$(jq -n \
@@ -71,20 +87,12 @@ echo "Configured:"
 api GET "/api/v5/connectors/kafka_producer:$CONNECTOR_NAME" \
   | jq '{connector: .name, type: .type, status: .status, bootstrap_hosts: .bootstrap_hosts}'
 
-slug() {
-  echo "$1" | tr '/.' '__' | tr -cd '[:alnum:]_'
-}
-
-IFS=',' read -ra mappings <<<"$TOPIC_MAPPINGS"
 for mapping in "${mappings[@]}"; do
   mqtt="${mapping%%=*}"
   kafka="${mapping#*=}"
   suffix="$(slug "$mqtt")"
   action_name="${ACTION_NAME_PREFIX}_${suffix}"
   rule_id="${RULE_ID_PREFIX}_${suffix}"
-
-  delete_if_exists "/api/v5/rules/$rule_id"
-  delete_if_exists "/api/v5/actions/kafka_producer:$action_name"
 
   action_payload="$(jq -n \
     --arg name "$action_name" \

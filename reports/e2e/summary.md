@@ -3,38 +3,38 @@
 Pipeline:
 
 ```text
-PythonSimulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Flink bounded Kafka source -> TopKResult
+PythonSimulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Apache Spark bounded Kafka reader -> SparkTopKEngine -> TopKResult
 ```
 
 Config:
 
-- objects: 5
-- queries: 1
+- objects: 200
+- queries: 2
 - dimensions: 4
-- k: 2
-- missingRate: 0.2
+- k: 10
+- missingRate: 0.35
 - publisherRatePerSecond: 200
 - mqttQos: 0
-- flinkParallelism: 2
+- sparkPartitions: 4
 - synopsisBins: 8
-- expectedMessages: 15
-- kafkaMessages: 15
-- topKResults: 15
-- dataset: all
+- expectedMessages: 400
+- kafkaMessages: 400
+- topKResults: 2
+- dataset: synthetic
 - datasetPath: 
-- topicMappings: thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas
+- topicMappings: thesis/raw=thesis.raw.incomplete
 
 Timing:
 
-- mqttPublishMs: 654
-- mqttToKafkaReadyMs: 1884
-- flinkDrainMs: 5455
-- totalE2EMs: 7340
-- publishRateMessagesPerSecond: 22.94
-- endToEndRateMessagesPerSecond: 2.04
+- mqttPublishMs: 2586
+- mqttToKafkaReadyMs: 3894
+- sparkDrainMs: 17077
+- totalE2EMs: 20973
+- publishRateMessagesPerSecond: 154.68
+- endToEndRateMessagesPerSecond: 19.07
 
 Artifacts:
 
-- Flink log: `reports/e2e/flink.log`
-- Flink submit log: `reports/e2e/flink-submit.log`
+- Spark log: `reports/e2e/spark.log`
+- Spark submit log: `reports/e2e/spark-submit.log`
 - CSV: `reports/e2e/summary.csv`

@@ -1,85 +1,78 @@
-# Installation Guide
-
-This project relies on **Docker** (for containerized environment, services, and simulation) and **Just** (a modern command runner to execute project recipes).
+# Install and Run
 
 ## Requirements
 
-- **Docker & Docker Compose plugin**
-- **Just** (Command runner for the `Justfile`)
+- Java 17
+- Maven
+- Docker with Docker Compose v2
+- Python 3.10+
+- `just`
+- Optional for Kubernetes: `kubectl`, kind/minikube, and a way to load local images
 
----
-
-## 🐧 Linux Installation (Recommended)
-
-### 1. Install Docker
-For most Linux distributions (Ubuntu/Debian/Fedora), you can easily install Docker with the official installation script:
-
-```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-```
-
-**Post-installation steps for Docker:**
-To run docker commands without `sudo`, add your user to the docker group:
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-### 2. Install `just`
-You can install `just` directly into your user's bin directory using their official script:
+## Build
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
+just test
+just image
 ```
-*(Ensure `~/.local/bin` is in your `PATH`)*
 
-Alternatively, if you use a package manager:
-- **Ubuntu/Debian (newer versions):** `sudo apt install just`
-- **Arch Linux:** `sudo pacman -S just`
-- **Homebrew (Linux/macOS):** `brew install just`
+The default Docker image is now Spark-based:
 
----
-
-## 🪟 Windows Installation
-
-**⚠️ IMPORTANT: Native Windows is not supported. You MUST use Windows Subsystem for Linux (WSL 2) to run this project.**
-
-### 1. Install WSL 2
-Open **PowerShell** as an Administrator and run:
-```powershell
-wsl --install
+```text
+thesis-topk-spark:local
 ```
-*Restart your computer if prompted.* This will install WSL 2 and default to an Ubuntu environment. Complete the Ubuntu setup by creating a UNIX username and password.
 
-### 2. Install Docker Desktop
-1. Download and install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/).
-2. During the installation, ensure the **"Use WSL 2 instead of Hyper-V"** box is checked.
-3. Open Docker Desktop.
-4. Go to **Settings (gear icon) -> Resources -> WSL Integration**.
-5. Enable integration with your default WSL distro (e.g., Ubuntu).
+It contains:
 
-### 3. Install `just` (Inside WSL)
-Open your WSL terminal (e.g., search for "Ubuntu" in your Windows start menu) and install `just` using the Linux bash script:
+```text
+/opt/spark/app/topk-spark.jar
+/opt/spark/datasets-raw
+```
+
+## Local Spark Run
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
+OBJECTS=200 QUERIES=2 DIMENSIONS=4 K=10 PARTITIONS=4 just spark
 ```
 
-Then, add it to your path so your terminal recognizes it:
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
----
-
-## ✅ Verification
-Open your terminal (Linux) or WSL terminal (Windows), navigate to the project directory, and run:
+## Docker Compose Spark Stack
 
 ```bash
-docker --version
-just --version
-just --list
+just setup
 ```
-If both installed correctly, `just --list` will parse the `Justfile` and show you the available commands to build, test, and run the thesis project.
+
+This starts:
+
+```text
+Kafka + EMQX + Spark master + Spark worker
+```
+
+Submit the Spark Kafka job:
+
+```bash
+EXPECTED_MESSAGES=400 OBJECTS=200 QUERIES=2 just spark-submit
+```
+
+Run complete E2E:
+
+```bash
+OBJECTS=200 QUERIES=2 EXPECTED_MESSAGES=400 just e2e
+```
+
+## Kubernetes
+
+```bash
+just image
+just simulator-image
+just k8s-apply
+just k8s-pods
+just k8s-logs
+```
+
+The manifest uses Spark resources named `spark-master`, `spark-worker`, and `spark-topk-submit`.
+
+## Cleanup
+
+```bash
+just clean
+```

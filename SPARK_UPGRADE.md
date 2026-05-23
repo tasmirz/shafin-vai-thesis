@@ -1,32 +1,41 @@
-# Spark Upgrade Summary
+# Spark Upgrade Notes
 
-The project has been upgraded so the required execution path uses Apache Spark.
+This package upgrades the whole operational path to Spark, not only the Java algorithm package.
 
-## Changed
+## Updated Areas
 
-- Added `src/main/java/com/thesis/topk/spark/SparkTopKEngine.java`.
-- Added `src/main/java/com/thesis/topk/spark/ProbabilisticTopKSparkJob.java`.
-- Added Maven dependencies for Apache Spark Core and Spark SQL.
-- Renamed the Maven artifact to `probabilistic-topk-spark`.
-- Added `just spark` for local Spark execution.
-- Added `Dockerfile.spark` for Spark submit execution.
-- Updated README and validation notes to describe the Spark-first architecture.
-- Added `reports/implementation/spark-upgrade-report.md`.
+- Spark RDD engine: `src/main/java/com/thesis/topk/spark/SparkTopKEngine.java`
+- Spark application entry point: `src/main/java/com/thesis/topk/spark/ProbabilisticTopKSparkJob.java`
+- Bounded Kafka input for Spark jobs using Kafka consumer APIs
+- Spark Docker runtime: `Dockerfile` and `Dockerfile.spark`
+- Spark Docker Compose stack: `docker-compose.e2e.yml`
+- Spark Kubernetes manifest: `k8s/pipeline.yaml`
+- Spark E2E script: `scripts/e2e-benchmark.sh`
+- Spark service bootstrap: `scripts/setup-services.sh`
+- Spark validation: `scripts/validate-e2e.py`
+- Spark monitor labels and metrics: `scripts/monitor.py`
+- Spark-first recipes: `Justfile`
 
-## Spark command
+## Runtime Pipeline
 
-```bash
-just spark
+```text
+PythonSimulator -> EMQX MQTT -> Kafka -> Spark bounded Kafka reader -> SparkTopKEngine -> TopKResult
 ```
 
-Direct Maven command:
+## Compose Services
 
-```bash
-mvn -q -DskipTests compile exec:java \
-  -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
-  -Dexec.args="--dataset=synthetic --objects=200 --queries=2 --dimensions=4 --k=5 --partitions=4 --sparkMaster=local[*]"
-```
+- `kafka`
+- `emqx`
+- `spark-master`
+- `spark-worker`
+- `spark-submit` profile service for one-off submissions
+
+## Kubernetes Resources
+
+- `spark-master` service and deployment
+- `spark-worker` deployment
+- `spark-topk-submit` job
 
 ## Notes
 
-The existing Flink/Kafka files remain for comparison, but the upgraded execution entry point is Spark.
+The legacy Flink Java package remains in the source tree for comparison, but it is no longer the default deployment path.

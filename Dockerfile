@@ -1,4 +1,11 @@
-FROM apache/flink:2.2.0-scala_2.12
+FROM apache/spark:3.5.3-java17
 
-COPY target/probabilistic-topk-spark-1.0.0-SNAPSHOT-shaded.jar /opt/flink/usrlib/topk.jar
-COPY datasets-raw /opt/flink/datasets-raw
+USER root
+WORKDIR /opt/spark/work-dir
+RUN mkdir -p /opt/spark/app /opt/spark/datasets-raw
+COPY target/probabilistic-topk-spark-1.0.0-SNAPSHOT-shaded.jar /opt/spark/app/topk-spark.jar
+COPY datasets-raw /opt/spark/datasets-raw
+
+# Keep the image usable for Spark master, worker, and spark-submit containers.
+ENTRYPOINT []
+CMD ["/opt/spark/bin/spark-submit", "--class", "com.thesis.topk.spark.ProbabilisticTopKSparkJob", "/opt/spark/app/topk-spark.jar"]

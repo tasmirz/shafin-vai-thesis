@@ -1,0 +1,16 @@
+engine=apache-spark source=simulator dataset=synthetic k=5 partitions=2 elapsedMs=4445
+rawEvents=200 probabilisticInstances=675 synopsisRules=8 synopsisBins=8
+TopKResult{engine=apache-spark, queryId=q0, objects=100, refined=5, pruned=95, pruneRatio=0.9500, tau=25.751363, compactShuffleRecords=100}
+query=q0 objects=100 refined=5 pruned=95 pruneRatio=0.9500 tau=25.751363 compactShuffleRecords=100
+  rank object=obj-35 score=55.294244 lb=54.294244 ub=56.294244 instances=1
+  rank object=obj-51 score=41.383639 lb=40.383639 ub=42.383639 instances=1
+  rank object=obj-58 score=29.492512 lb=28.936956 ub=30.048068 instances=2
+  rank object=obj-89 score=28.052851 lb=27.794703 ub=28.311000 instances=4
+  rank object=obj-3 score=26.251363 lb=25.751363 ub=26.751363 instances=2
+TopKResult{engine=apache-spark, queryId=q1, objects=100, refined=7, pruned=93, pruneRatio=0.9300, tau=23.711644, compactShuffleRecords=100}
+query=q1 objects=100 refined=7 pruned=93 pruneRatio=0.9300 tau=23.711644 compactShuffleRecords=100
+  rank object=obj-57 score=37.995017 lb=37.439462 ub=38.550573 instances=2
+  rank object=obj-60 score=29.598314 lb=29.098314 ub=30.098314 instances=2
+  rank object=obj-26 score=26.146989 lb=25.893143 ub=26.400835 instances=4
+  rank object=obj-41 score=25.894799 lb=25.394799 ub=26.394799 instances=2
+  rank object=obj-45 score=24.291580 lb=23.291580 ub=25.291580 instances=1
