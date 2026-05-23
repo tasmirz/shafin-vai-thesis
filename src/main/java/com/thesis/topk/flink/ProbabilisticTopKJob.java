@@ -1,5 +1,6 @@
 package com.thesis.topk.flink;
 
+import com.thesis.topk.algorithm.DdImputationSynopsis;
 import com.thesis.topk.dataset.DatasetProviders;
 import com.thesis.topk.dataset.DatasetProvider;
 import com.thesis.topk.dataset.DatasetRouting;
@@ -28,11 +29,23 @@ public final class ProbabilisticTopKJob {
     long windowMs = parsed.longValue("windowMs", 30_000L);
     long outOfOrderMs = parsed.longValue("outOfOrderMs", 1_000L);
     String source = parsed.stringValue("source", "simulator");
+    int parallelism = parsed.intValue("parallelism", 1);
+    int synopsisBins = parsed.intValue("synopsisBins", 8);
 
     SimulationData simulation = DatasetProviders.generate(parsed);
+    DdImputationSynopsis synopsis = DdImputationSynopsis.train(simulation.events(), synopsisBins);
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-    env.setParallelism(1);
+    env.setParallelism(parallelism);
     env.getConfig().setAutoWatermarkInterval(100L);
+    System.out.printf(
+        "pipelineConfig source=%s parallelism=%d windowMs=%d synopsisRules=%d synopsisBins=%d "
+            + "synopsisAvgCandidateCount=%.3f%n",
+        source,
+        parallelism,
+        windowMs,
+        synopsis.ruleCount(),
+        synopsis.bins(),
+        synopsis.averageEstimatedCandidateCount());
 
     DataStream<RawEvent> raw = rawEvents(env, parsed, simulation, source)
         .assignTimestampsAndWatermarks(
@@ -41,12 +54,12 @@ public final class ProbabilisticTopKJob {
                     (SerializableTimestampAssigner<RawEvent>) (event, ignored) -> event.eventTime()));
 
     raw
-        .map(new FlinkImputationFunction(simulation.rules()))
+        .map(new FlinkImputationFunction(synopsis))
         .keyBy(ImputedRecord::queryId)
         .process(new TopKProcessFunction(simulation.queryPoints(), config.k(), windowMs))
         .print();
 
-    env.execute("paper-grounded-probabilistic-topk");
+    env.execute("paper-informed-probabilistic-topk");
     System.exit(0);
   }
 

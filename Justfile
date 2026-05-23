@@ -17,6 +17,8 @@ dataset := env_var_or_default("DATASET", "synthetic")
 dataset_path := env_var_or_default("DATASET_PATH", "")
 partitions := env_var_or_default("PARTITIONS", "4")
 candidate_multiplier := env_var_or_default("CANDIDATE_MULTIPLIER", "4")
+parallelism := env_var_or_default("PARALLELISM", "1")
+synopsis_bins := env_var_or_default("SYNOPSIS_BINS", "8")
 max_events := env_var_or_default("MAX_EVENTS", "0")
 
 # list available recipes
@@ -62,16 +64,15 @@ bench:
     mkdir -p reports/algorithm
     mvn -q -DskipTests compile exec:java \
       -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
-      -Dexec.args="--dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --candidateMultiplier={{ candidate_multiplier }}" \
+      -Dexec.args="--dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --candidateMultiplier={{ candidate_multiplier }} --synopsisBins={{ synopsis_bins }}" \
       > reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
     tail -n 8 reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
 
-# run the simulator-backed Flink job on the local JVM
-run-local: package
+# run the simulator-backed Flink job on the local JVM with provided Flink libraries
+run-local:
     JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED" \
-      java -cp target/probabilistic-topk-flink-1.0.0-SNAPSHOT-shaded.jar \
-      com.thesis.topk.flink.ProbabilisticTopKJob \
-      --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }}
+      mvn -q -DskipTests compile exec:exec -Dexec.classpathScope=compile -Dexec.executable=java \
+      -Dexec.args="-cp %classpath com.thesis.topk.flink.ProbabilisticTopKJob --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}"
 
 # publish generated incomplete records to a local MQTT broker
 publish-local:
@@ -81,13 +82,11 @@ publish-local:
       --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --missing-rate={{ missing_rate }} \
       --rate-per-second=20 --repeat=1
 
-# run the Kafka-backed Flink job on the local JVM
-run-kafka-local: package
+# run the Kafka-backed Flink job on the local JVM with provided Flink libraries
+run-kafka-local:
     JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED" \
-      java -cp target/probabilistic-topk-flink-1.0.0-SNAPSHOT-shaded.jar \
-      com.thesis.topk.flink.ProbabilisticTopKJob \
-      --source=kafka --kafkaBootstrap=localhost:9092 --kafkaTopic=thesis.raw.incomplete \
-      --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }}
+      mvn -q -DskipTests compile exec:exec -Dexec.classpathScope=compile -Dexec.executable=java \
+      -Dexec.args="-cp %classpath com.thesis.topk.flink.ProbabilisticTopKJob --source=kafka --kafkaBootstrap=localhost:9092 --kafkaTopic=thesis.raw.incomplete --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}"
 
 # start Kafka, EMQX, and the Flink session cluster
 setup: image
@@ -110,6 +109,8 @@ e2e:
     DATASET={{ dataset }} \
     DATASET_PATH={{ dataset_path }} \
     MAX_EVENTS={{ max_events }} \
+    PARALLELISM={{ parallelism }} \
+    SYNOPSIS_BINS={{ synopsis_bins }} \
     scripts/e2e-benchmark.sh
 
 # run E2E without rebuilding the image in setup-services
@@ -125,6 +126,8 @@ e2e-fast:
     DATASET={{ dataset }} \
     DATASET_PATH={{ dataset_path }} \
     MAX_EVENTS={{ max_events }} \
+    PARALLELISM={{ parallelism }} \
+    SYNOPSIS_BINS={{ synopsis_bins }} \
     BUILD_IMAGE=0 \
     scripts/e2e-benchmark.sh
 
@@ -135,7 +138,7 @@ flink-submit:
       -c com.thesis.topk.flink.ProbabilisticTopKJob \
       /opt/flink/usrlib/topk.jar \
       --source=kafka --kafkaBounded=true --kafkaBootstrap=kafka:9092 \
-      --kafkaTopic=thesis.raw.incomplete --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }}
+      --kafkaTopic=thesis.raw.incomplete --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}
 
 # validate monitor metrics from the CLI
 monitor-check expected=expected_messages:
@@ -180,6 +183,8 @@ test-all:
     DATASET_PATH={{ dataset_path }} \
     PARTITIONS={{ partitions }} \
     CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
+    PARALLELISM={{ parallelism }} \
+    SYNOPSIS_BINS={{ synopsis_bins }} \
     scripts/test-all.sh
 
 # run full verification and preserve verbose console output for the GUI
@@ -188,6 +193,7 @@ test-all-verbose:
     set -o pipefail; OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
       MISSING_RATE={{ missing_rate }} RATE_PER_SECOND={{ rate_per_second }} QOS={{ qos }} WINDOW_MS={{ window_ms }} \
       DATASET={{ dataset }} DATASET_PATH={{ dataset_path }} PARTITIONS={{ partitions }} CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
+      PARALLELISM={{ parallelism }} SYNOPSIS_BINS={{ synopsis_bins }} \
       scripts/test-all.sh 2>&1 | tee reports/tests/latest.log
 
 # show current Docker services

@@ -29,8 +29,9 @@ The latest validated raw-route execution processed 15 records end to end:
 | Flink `TopKResult` outputs | 15 |
 | Ingestion completeness | 100% |
 | Processing completeness | 100% |
-| Total E2E time | 5,563 ms |
-| E2E throughput | 2.70 messages/s |
+| Flink parallelism / synopsis bins | 2 / 8 |
+| Total E2E time | 7,340 ms |
+| E2E throughput | 2.04 messages/s |
 
 This result validates the proposed replacement architecture. The papers supply the incomplete-data and top-k motivation; this implementation evaluates an EMQX/Kafka/Flink execution design rather than recreating their Spark or MapReduce deployments.
 
@@ -267,7 +268,7 @@ Relevant settings:
 
 | Setting | Current behavior |
 | --- | --- |
-| Job parallelism | Set in code to `1` |
+| Job parallelism | Configurable with `--parallelism`; Docker E2E result uses `2` |
 | Default event-time window | `30,000 ms`; E2E test uses `10,000 ms` |
 | Watermark out-of-orderness | Default `1,000 ms` |
 | Watermark interval | `100 ms` |
@@ -275,18 +276,18 @@ Relevant settings:
 
 ### 6.3 Missing-Value Processing
 
-The imputation function converts each incomplete raw event into one or more `ProbabilisticInstance` alternatives. For each missing dimension:
+The imputation function converts each incomplete raw event into one or more `ProbabilisticInstance` alternatives. Before ranking, `DdImputationSynopsis` learns conditional histogram rules from available observed values. For each target dimension it evaluates determinant dimensions and selects the bucket rule with lower estimated candidate matching cost than an unconditional fallback. For each missing dimension:
 
-1. Retrieve an imputation rule for that dimension or use a default rule.
-2. Generate low-value and high-value alternatives.
+1. Retrieve cost-selected synopsis candidates for the observed determinant bucket, or use a default fallback.
+2. Generate conditional probabilistic alternatives.
 3. Multiply alternative probabilities as multiple missing fields are expanded.
 4. Normalize probabilities for the event after expansion.
 
-This implementation is a simplified rule-based probabilistic expansion. It is not yet the paper's full DD repository lookup or cost-model-driven imputation.
+The benchmark masks held-out observed values and reports MAE for this DD-style synopsis. It is a compact implemented cost model; it is not a claim that the complete differential-dependency repository or paper accuracy protocol has been reproduced.
 
 ### 6.4 Ranking Processing
 
-For each keyed query family, `TopKProcessFunction` keeps live probabilistic instances in Flink state, removes expired instances when event-time timers fire, and executes pruned top-k ranking over the remaining window.
+For each keyed query family, `TopKProcessFunction` keeps live probabilistic instances in Flink state, replaces prior object state on `UPSERT`, removes it on `DELETE`, cleans expired instances with event-time timers, and emits updated ranking output on each arrival.
 
 The ranking implementation:
 
@@ -441,6 +442,8 @@ Test configuration:
 | Missing rate argument | 0.2 |
 | Publisher target rate | 200 messages/s |
 | MQTT QoS | 0 |
+| Flink parallelism | 2 |
+| DD synopsis bins | 8 |
 
 Result:
 
@@ -459,11 +462,11 @@ Timing:
 
 | Stage | Duration |
 | --- | ---: |
-| Simulator MQTT publication | 548 ms |
-| MQTT publication start to Kafka completeness | 1,678 ms |
-| Bounded Flink drain | 3,884 ms |
-| Total E2E | 5,563 ms |
-| E2E throughput | 2.70 messages/s |
+| Simulator MQTT publication | 654 ms |
+| MQTT publication start to Kafka completeness | 1,884 ms |
+| Bounded Flink drain | 5,455 ms |
+| Total E2E | 7,340 ms |
+| E2E throughput | 2.04 messages/s |
 
 ### 10.2 Algorithm Benchmark Indicator
 
@@ -475,9 +478,12 @@ A separate synthetic algorithm run currently records:
 | Queries | 2 |
 | `k` | 10 |
 | Missing rate | 0.35 |
-| Exact baseline average | 7.801 ms |
-| Certified-pruned average | 14.814 ms |
-| Fast-candidate average | 2.512 ms |
+| DD synopsis rules / bins | 8 / 8 |
+| Masked-holdout values / MAE | 104 / 0.169489 |
+| Exact baseline average | 10.457 ms |
+| Certified-pruned average | 14.812 ms |
+| Fast-candidate average | 3.044 ms |
+| Certified prune ratio | 0.855 |
 | Fast candidate internal precision@k | 1.000 |
 | Candidate communication-reduction proxy | 0.600 |
 | Four-partition shuffle proxy | 5,120 bytes |
@@ -493,18 +499,19 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 5. **Deterministic E2E testing.** Bounded Kafka consumption provides finite test completion and message-count validation.
 6. **Portable deployment definition.** Docker Compose handles local verification and Kubernetes manifests describe cluster deployment.
 7. **Transparent metric labeling.** Algorithm proxy metrics are explicitly separated from measured EMQX/Kafka/Flink traffic and completion measures.
+8. **Paper-informed analytics extension.** DD-style synopsis selection, masked-holdout MAE, delete-aware windows, and configurable Flink parallelism are executable and visible through the CLI/monitor.
 
 ## 12. Limitations And Risks
 
 | Area | Current limitation | Consequence |
 | --- | --- | --- |
-| Flink scalability | Job forces `parallelism=1` in code | Kubernetes worker replicas are not used for parallel benchmark execution as currently configured |
+| Flink scalability | Parallelism is configurable and Compose E2E has been checked at `2`; Kubernetes performance has not been measured | Scaling evidence is currently limited to functional parallel execution |
 | Delivery semantics | Raw E2E runs use MQTT QoS `0` | The benchmark validates observed successful records but does not demonstrate delivery guarantees under failures |
 | Kafka topology | Single Kafka broker | No broker redundancy or failover evidence |
 | EMQX topology | Single EMQX instance | No MQTT ingress high availability evidence |
 | Kubernetes verification | Manifests exist but current recorded E2E result is Compose-based | No Kubernetes throughput or recovery result is currently claimed |
 | Broker metric interpretation | Global EMQX `messages.dropped` is nonzero while Kafka actions succeed | Dashboard users must distinguish MQTT delivery behavior from bridge forwarding health |
-| Imputation model | Simplified generated imputation rules | External accuracy evidence requires configurable or dataset-specific rules |
+| Imputation model | DD-style conditional histogram synopsis with holdout MAE; not a full DD dependency repository | External real-data accuracy still requires controlled masking and ground truth |
 | Top-k semantics | Implemented mode is PTD-style expected dynamic dominance | PT-k would be a separate optional comparison mode, not a runtime requirement |
 | Accuracy evaluation | No complete-data ground-truth injection/retention protocol | No independent precision/recall/F-score result yet |
 | Performance scale | Small smoke and prototype benchmark sizes | Does not establish production-scale throughput or scaling |
@@ -513,7 +520,7 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 
 ### Operational Hardening
 
-1. Remove the fixed `env.setParallelism(1)` behavior or make it configurable, then measure Flink parallel execution.
+1. Execute Kubernetes throughput/recovery experiments at multiple Flink parallelism settings.
 2. Define an intentional MQTT reliability profile (`QoS=1` for durable benchmark runs) and test reconnect/retry behavior.
 3. Investigate the EMQX global dropped-delivery metric and document whether it represents absent MQTT subscribers or another broker condition.
 4. Add Kubernetes E2E execution and reporting rather than manifest-only validation.
@@ -522,7 +529,7 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 ### Analytics Validation Extensions
 
 1. Retain complete Intel/Pump/Gas source records and inject missing fields under a controlled protocol.
-2. Implement dataset-specific DD rules and ground-truth Precision/Recall/F-score calculation.
+2. Calibrate the DD-style synopsis per dataset and add ground-truth Precision/Recall/F-score calculation.
 3. Optionally implement PT-k count-window evaluation as a second algorithm mode for comparison.
 4. Measure the selected architecture using EMQX action latency/error counts, Kafka ingress throughput, and Flink processing latency at larger scales.
 

@@ -182,6 +182,11 @@ def parse_algorithm():
   pruned = [float(x) for x in re.findall(r"certifiedPrunedMs=([0-9.]+)", text)]
   if not pruned:
     pruned = [float(x) for x in re.findall(r"prunedMs=([0-9.]+)", text)]
+  synopsis = re.search(
+      r"imputationSynopsis rules=([0-9]+) bins=([0-9]+) avgCandidateCount=([0-9.]+) "
+      r"trainingEvents=([0-9]+) holdoutEvents=([0-9]+) evaluatedValues=([0-9]+) "
+      r"holdoutMAE=(n/a|[0-9.]+)",
+      text)
   true_count = sum(1 for value in agreements if value == "true")
   return {
     "agreement": (true_count / len(agreements)) if agreements else None,
@@ -194,6 +199,12 @@ def parse_algorithm():
     "avgPartitionedShuffleWriteBytes": (sum(shuffle_write) / len(shuffle_write)) if shuffle_write else None,
     "avgExactMs": (sum(exact) / len(exact)) if exact else None,
     "avgPrunedMs": (sum(pruned) / len(pruned)) if pruned else None,
+    "synopsisRules": int(synopsis.group(1)) if synopsis else None,
+    "synopsisBins": int(synopsis.group(2)) if synopsis else None,
+    "synopsisAvgCandidateCount": float(synopsis.group(3)) if synopsis else None,
+    "imputationEvaluatedValues": int(synopsis.group(6)) if synopsis else None,
+    "imputationHoldoutMae": (
+        None if not synopsis or synopsis.group(7) == "n/a" else float(synopsis.group(7))),
   }
 
 
@@ -264,6 +275,11 @@ def metrics():
       "avgPartitionedShuffleWriteBytes": algorithm.get("avgPartitionedShuffleWriteBytes"),
       "avgExactMs": algorithm.get("avgExactMs"),
       "avgPrunedMs": algorithm.get("avgPrunedMs"),
+      "synopsisRules": algorithm.get("synopsisRules"),
+      "synopsisBins": algorithm.get("synopsisBins"),
+      "synopsisAvgCandidateCount": algorithm.get("synopsisAvgCandidateCount"),
+      "imputationEvaluatedValues": algorithm.get("imputationEvaluatedValues"),
+      "imputationHoldoutMae": algorithm.get("imputationHoldoutMae"),
       "algorithmQueries": algorithm.get("queries"),
     },
     "summary": summary,
@@ -430,6 +446,8 @@ INDEX = r"""<!doctype html>
       <div class="card"><div class="label">Prune Ratio</div><div class="value" id="prune">n/a</div><div class="sub">algorithm benchmark</div></div>
       <div class="card"><div class="label">Partitioned Precision</div><div class="value" id="partitionedPrecision">n/a</div><div class="sub">4-partition model</div></div>
       <div class="card"><div class="label">Shuffle Proxy</div><div class="value" id="shuffleWrite">n/a</div><div class="sub">calculated candidate bytes</div></div>
+      <div class="card"><div class="label">Imputation MAE</div><div class="value" id="imputationMae">n/a</div><div class="sub">masked holdout values</div></div>
+      <div class="card"><div class="label">DD Synopsis Rules</div><div class="value" id="synopsisRules">n/a</div><div class="sub">cost-selected histogram rules</div></div>
       <div class="card wide"><div class="label">Topic Traffic</div><pre id="topics">Waiting for traffic...</pre></div>
       <div class="card wide"><div class="label">Throughput</div><canvas id="chart"></canvas></div>
       <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Flink log: <code>reports/e2e/flink.log</code></div></div>
@@ -481,6 +499,8 @@ async function tick() {
     $("prune").textContent = pct(m.accuracy.avgPruneRatio);
     $("partitionedPrecision").textContent = pct(m.accuracy.avgPartitionedPrecisionAtK);
     $("shuffleWrite").textContent = m.accuracy.avgPartitionedShuffleWriteBytes == null ? "n/a" : Math.round(m.accuracy.avgPartitionedShuffleWriteBytes).toLocaleString();
+    $("imputationMae").textContent = m.accuracy.imputationHoldoutMae == null ? "n/a" : m.accuracy.imputationHoldoutMae.toFixed(4);
+    $("synopsisRules").textContent = m.accuracy.synopsisRules == null ? "n/a" : m.accuracy.synopsisRules.toLocaleString();
     $("topics").textContent = Object.entries(m.kafka.byTopic || {}).map(([topic, count]) => `${topic.padEnd(26)} ${count}`).join("\n") || "No topic offsets available.";
     const issues = $("issues"); issues.innerHTML = "";
     (m.issues.length ? m.issues : ["No current issues detected"]).forEach(issue => {

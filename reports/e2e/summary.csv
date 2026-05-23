@@ -1,2 +1,2 @@
-objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
-5,1,4,2,0.2,0,15,15,15,548,1678,3884,5563,27.37,2.70,all,"thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"
+objects,queries,dimensions,k,missing_rate,mqtt_qos,flink_parallelism,synopsis_bins,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
+5,1,4,2,0.2,0,2,8,15,15,15,654,1884,5455,7340,22.94,2.04,all,"thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"

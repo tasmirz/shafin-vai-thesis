@@ -14,6 +14,8 @@ MISSING_RATE="${MISSING_RATE:-0.35}"
 RATE_PER_SECOND="${RATE_PER_SECOND:-200}"
 QOS="${QOS:-0}"
 WINDOW_MS="${WINDOW_MS:-10000}"
+PARALLELISM="${PARALLELISM:-1}"
+SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
 SEED="${SEED:-7}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
@@ -145,6 +147,8 @@ if [[ "$DATASET" == "all" ]]; then
     --k="$K" \
     --missingRate="$MISSING_RATE" \
     --windowMs="$WINDOW_MS" \
+    --parallelism="$PARALLELISM" \
+    --synopsisBins="$SYNOPSIS_BINS" \
     --maxEvents="$MAX_EVENTS" \
     --seed="$SEED" >>"$FLINK_SUBMIT_LOG" 2>&1
 else
@@ -166,6 +170,8 @@ else
     --k="$K" \
     --missingRate="$MISSING_RATE" \
     --windowMs="$WINDOW_MS" \
+    --parallelism="$PARALLELISM" \
+    --synopsisBins="$SYNOPSIS_BINS" \
     --maxEvents="$MAX_EVENTS" \
     --seed="$SEED" >>"$FLINK_SUBMIT_LOG" 2>&1
 fi
@@ -201,6 +207,8 @@ Config:
 - missingRate: $MISSING_RATE
 - publisherRatePerSecond: $RATE_PER_SECOND
 - mqttQos: $QOS
+- flinkParallelism: $PARALLELISM
+- synopsisBins: $SYNOPSIS_BINS
 - expectedMessages: $EXPECTED_MESSAGES
 - kafkaMessages: $kafka_messages
 - topKResults: $topk_results
@@ -225,8 +233,8 @@ Artifacts:
 EOF
 
 cat >"$CSV" <<EOF
-objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
-$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$flink_ms,$total_ms,$publish_rate,$end_to_end_rate,$DATASET,"$TOPIC_MAPPINGS"
+objects,queries,dimensions,k,missing_rate,mqtt_qos,flink_parallelism,synopsis_bins,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
+$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$PARALLELISM,$SYNOPSIS_BINS,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$flink_ms,$total_ms,$publish_rate,$end_to_end_rate,$DATASET,"$TOPIC_MAPPINGS"
 EOF
 
 cat "$SUMMARY"

@@ -4,10 +4,11 @@ This project implements a compact Apache Flink DataStream prototype for probabil
 
 The implementation adapts selected incomplete-data/top-k concepts into a replacement streaming architecture:
 
-- incomplete raw records are repaired into probabilistic instances;
+- incomplete raw records are repaired into probabilistic instances using a compact DD-style conditional-histogram synopsis;
 - ranking uses query-relative dynamic dominance;
 - local lower/upper score bounds prune obvious non-candidates;
 - exact refinement is retained for the surviving candidates;
+- keyed Flink window state updates rankings on arrivals and honors `UPSERT`/`DELETE` events;
 - a pluggable dataset provider produces imperfect stream data for testing and benchmarking.
 
 ## Command Runner
@@ -53,8 +54,9 @@ The algorithm benchmark reports metrics of the implemented Flink-oriented analyt
 - precision@k against this implementation's exact ranking;
 - candidate communication-reduction proxy;
 - partitioned candidate refinement and calculated shuffle-write proxy bytes.
+- masked-holdout imputation MAE and learned synopsis size.
 
-These metrics are reported for this architecture: Spark is not executing the benchmark and shuffle proxy values are not presented as Spark metrics. Ground-truth F-score over intentionally masked Intel/Pump/Gas inputs remains an accuracy-evaluation extension.
+These metrics are reported for this architecture: Spark is not executing the benchmark and shuffle proxy values are not presented as Spark metrics. The implemented MAE evaluates masked holdout fields; ground-truth F-score/Precision@k over a controlled complete Intel/Pump/Gas input protocol remains an accuracy-evaluation extension.
 
 ## Run Tests
 
@@ -72,7 +74,7 @@ The benchmark defaults to `DATASET=synthetic`, `PARTITIONS=4`, and `CANDIDATE_MU
 
 ```bash
 OBJECTS=1000 QUERIES=2 DIMENSIONS=4 K=10 \
-DATASET=synthetic PARTITIONS=4 CANDIDATE_MULTIPLIER=4 \
+DATASET=synthetic PARTITIONS=4 CANDIDATE_MULTIPLIER=4 SYNOPSIS_BINS=8 \
 just bench
 ```
 
@@ -127,8 +129,7 @@ DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 just e2e
 ## Run Local Flink Job On The JVM
 
 ```bash
-just package
-OBJECTS=200 QUERIES=2 K=5 just run-local
+OBJECTS=200 QUERIES=2 K=5 PARALLELISM=2 SYNOPSIS_BINS=8 just run-local
 ```
 
 ## MQTT -> Kafka -> Flink Stream
@@ -162,6 +163,8 @@ OBJECTS=200 QUERIES=2 K=5 just flink-submit
 ```
 
 The Flink Web UI is exposed at `http://localhost:8081`.
+
+`PARALLELISM` and `SYNOPSIS_BINS` are available on the local, E2E, submit, and full-test recipes. The Kubernetes manifest runs the Flink job with `--parallelism=2` and `--synopsisBins=8`.
 
 ## Kubernetes
 

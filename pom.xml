@@ -6,7 +6,7 @@
   <groupId>com.thesis</groupId>
   <artifactId>probabilistic-topk-flink</artifactId>
   <version>1.0.0-SNAPSHOT</version>
-  <name>Paper Grounded Probabilistic Top-k Flink Simulator</name>
+  <name>Paper-Informed EMQX-Kafka-Flink Top-k Stream Processor</name>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>

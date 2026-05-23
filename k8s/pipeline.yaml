@@ -249,7 +249,7 @@ data:
     taskmanager.rpc.port: 6122
     jobmanager.memory.process.size: 1600m
     taskmanager.memory.process.size: 1728m
-    parallelism.default: 1
+    parallelism.default: 2
     classloader.check-leaked-classloader: false
   log4j-console.properties: |+
     rootLogger.level = INFO
@@ -335,6 +335,8 @@ spec:
             - --queries=2
             - --missingRate=0.35
             - --windowMs=10000
+            - --parallelism=2
+            - --synopsisBins=8
           livenessProbe:
             tcpSocket:
               port: 6123

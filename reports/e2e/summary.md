@@ -15,6 +15,8 @@ Config:
 - missingRate: 0.2
 - publisherRatePerSecond: 200
 - mqttQos: 0
+- flinkParallelism: 2
+- synopsisBins: 8
 - expectedMessages: 15
 - kafkaMessages: 15
 - topKResults: 15
@@ -24,12 +26,12 @@ Config:
 
 Timing:
 
-- mqttPublishMs: 548
-- mqttToKafkaReadyMs: 1678
-- flinkDrainMs: 3884
-- totalE2EMs: 5563
-- publishRateMessagesPerSecond: 27.37
-- endToEndRateMessagesPerSecond: 2.70
+- mqttPublishMs: 654
+- mqttToKafkaReadyMs: 1884
+- flinkDrainMs: 5455
+- totalE2EMs: 7340
+- publishRateMessagesPerSecond: 22.94
+- endToEndRateMessagesPerSecond: 2.04
 
 Artifacts:
 

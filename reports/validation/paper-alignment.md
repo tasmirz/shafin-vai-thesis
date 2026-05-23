@@ -4,6 +4,10 @@ This report validates the implemented EMQX, Kafka, and Apache Flink architecture
 
 - `papers/s10115-023-01917-3(Target Paper).pdf`: Distributed probabilistic top-k dominating queries over uncertain databases.
 - `papers/10295282.pdf`: Effective and efficient top-k query processing over incomplete data streams.
+- `papers/An_Efficient_Distributed_Framework_for_Top-k_Dominating_Query_Over_Uncertain_Databases.pdf`: candidate pruning and aggregated distributed emission for PTD.
+- `papers/114693.pdf`: continuous uncertain top-k processing under a sliding-window model.
+- `papers/3700838.3700859.pdf`: distributed probabilistic skyline processing and pruning context.
+- `papers/Space-Efficient_Indexes_for_Uncertain_Strings.pdf`: compact uncertain-data index motivation; its string index is not directly reused.
 - `papers/Pre-defense.pdf`: Spark framework proposal combining incomplete-stream imputation and distributed PTD pruning.
 
 ## Positioning
@@ -33,11 +37,13 @@ Accordingly:
 | --- | --- | --- |
 | Incomplete stream records | Python simulator publishes normalized `RawEvent` JSON with `null` attributes and `missingMask` | Implemented and E2E validated |
 | Real incomplete-data families | Sender preprocesses Intel, Pump, and Gas archives separately | Implemented and routed separately |
-| Probabilistic representation after repair | `ImputationEngine` emits mutually exclusive `ProbabilisticInstance` alternatives with normalized probabilities | Implemented using simplified rules |
+| Probabilistic representation after repair | `DdImputationSynopsis` learns compact conditional histograms and `ImputationEngine` emits normalized probabilistic alternatives | Implemented with cost-selected DD-style synopses |
+| Imputation accuracy evidence | Benchmark masks held-out observed values and reports imputation MAE | Implemented; this is not yet paper-style F-score |
 | Query-relative dynamic dominance | `DominanceScorer.dynamicallyDominates` evaluates distance from configured query points | Implemented |
 | Expected dominance ranking | `expectedDominanceScore` sums probability-weighted dominated mass per object | Implemented |
 | Candidate pruning and exact refinement | `ProbabilisticTopK` supports certified and fast candidate paths against its exact ranking baseline | Implemented and internally checked |
-| Continuous/stream processing objective | Flink consumes Kafka streams and emits event-time-window top-k results | Implemented |
+| Continuous/stream processing objective | Flink keeps keyed sliding-window state and emits an updated top-k after each arrival/upsert/delete | Implemented |
+| Configurable distributed execution | Flink operator parallelism is a CLI/Kubernetes setting; Kubernetes default is `2` task slots across `2` TaskManagers | Implemented for selected architecture |
 
 ## Intentional Architectural Replacements
 
@@ -71,9 +77,9 @@ The Flink application performs:
 KafkaSource
   -> RawEvent deserialization
   -> event-time watermark assignment
-  -> probabilistic imputation
+  -> cost-selected DD-style synopsis imputation
   -> query-family keyed state
-  -> time-window top-k ranking
+  -> incremental sliding-window PTD-style top-k ranking
   -> TopKResult output
 ```
 
@@ -86,12 +92,13 @@ The current ranking semantic is PTD-style expected dynamic dominance. It is a de
 A repeatable algorithm test generated `reports/algorithm/topk-100x2.txt`:
 
 ```text
-dataset=synthetic objects=100 events=200 dimensions=4 queries=2 k=10 missingRate=0.350 partitions=4
+dataset=synthetic objects=100 events=200 instances=662 dimensions=4 queries=2 k=10 missingRate=0.350 partitions=4
 executionEngine=java-local partitionModelNodes=4 shuffleMetric=calculated-candidate-proxy
-avgExactMs=7.801
-avgCertifiedPrunedMs=14.814
-avgFastCandidateMs=2.512
-avgCertifiedPruneRatio=0.900
+imputationSynopsis rules=8 bins=8 evaluatedValues=104 holdoutMAE=0.169489
+avgExactMs=10.457
+avgCertifiedPrunedMs=14.812
+avgFastCandidateMs=3.044
+avgCertifiedPruneRatio=0.855
 avgCandidateCommunicationReduction=0.600
 avgFastPrecisionAtK=1.000
 avgPartitionedShuffleWriteProxyBytes=5120
@@ -101,12 +108,13 @@ avgPartitionedPrecisionAtK=1.000
 Interpretation:
 
 - `avgFastPrecisionAtK=1.000` is agreement with this implementation's exact expected-dominance baseline on the tested synthetic workload.
+- `holdoutMAE=0.169489` measures DD-style imputation against values masked from a deterministic synthetic holdout. It is not comparable to a paper F-score until a complete-record missingness protocol is run on real datasets.
 - `avgCandidateCommunicationReduction=0.600` and `avgPartitionedShuffleWriteProxyBytes=5120` are candidate-processing indicators, not measured Spark shuffle/network quantities.
 - The check validates internal ranking and pruning behavior for the Flink-oriented implementation.
 
 ### EMQX-Kafka-Flink Raw Dataset E2E Check
 
-The GUI-triggered raw pipeline validation produced:
+The raw pipeline validation after the upgrade produced:
 
 ```text
 dataset: all (intel, pump, gas)
@@ -115,7 +123,9 @@ expected_messages: 15
 kafka_messages: 15
 topk_results: 15
 flink_version: 2.2.0
-e2e_rate_msg_s: 2.70
+flink_parallelism: 2
+synopsis_bins: 8
+e2e_rate_msg_s: 2.04
 status: passed
 ```
 
@@ -140,6 +150,7 @@ This validates the replacement architecture path: simulator preprocessing, per-d
 | Architecture | EMQX/Kafka/Flink pipeline executes raw incomplete events end to end | It reproduces the papers' MapReduce or Spark runtime |
 | Datasets | Intel, Pump, and Gas are accepted and isolated through ingress topics | California-road experiments are reproduced |
 | Ranking | Current PTD-style ranking is internally consistent against its exact baseline on tested data | Current score is identical to Topk-iDS PT-k/F-score semantics |
+| Imputation | Compact DD-style conditional histograms select repairs and expose holdout MAE | The full differential-dependency repository/cost model from prior proposals is reproduced |
 | Communication | Kafka/EMQX traffic and calculated candidate proxies are observable | Proxy bytes equal Spark Shuffle Write or paper communication cost |
 | Accuracy | Pipeline completeness and internal pruning fidelity are measured | Paper-style ground-truth F-score has been measured |
 
@@ -150,8 +161,8 @@ The remaining tasks below improve the proposed Flink architecture rather than re
 | Improvement | Reason |
 | --- | --- |
 | Preserve complete Intel/Pump/Gas records before simulated missingness and compute Precision/Recall/F-score | Add external accuracy evidence for the chosen ranking/imputation design |
-| Implement dataset-specific imputation rules or configurable rule loading | Replace generic repair assumptions with dataset-informed behavior |
-| Make Flink parallelism configurable and run parallel Kubernetes E2E measurements | Validate scaling of the selected Flink execution model |
+| Calibrate DD-style synopsis rules per dataset and run controlled real-data masking | Turn raw-data MAE/Precision@k into meaningful external accuracy evidence |
+| Execute and record Kubernetes scaling measurements beyond the Compose run at `parallelism=2` | Validate scaling and recovery of the selected Flink execution model |
 | Measure Kafka/EMQX throughput over larger raw workloads and failure cases | Validate ingress robustness and realistic throughput |
 | Investigate broker-level `messages.dropped` while Kafka action success remains complete | Clarify the operational reliability metric presented in the GUI |
 | Optionally add PT-k operator mode | Enable a direct semantic comparison with Topk-iDS if required for analysis, without replacing the architecture |

@@ -14,6 +14,8 @@ DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
 PARTITIONS="${PARTITIONS:-4}"
 CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
+PARALLELISM="${PARALLELISM:-1}"
+SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
 MAX_EVENTS="${MAX_EVENTS:-$((OBJECTS * QUERIES))}"
 if [[ "$DATASET" == "all" ]]; then
   EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((MAX_EVENTS * 3))}"
@@ -35,6 +37,12 @@ scripts/setup-venv.sh
 
 echo "== unit tests =="
 mvn test
+
+echo "== local Flink CLI stream smoke test =="
+OBJECTS=4 QUERIES=2 DIMENSIONS=4 K=2 PARALLELISM=2 SYNOPSIS_BINS=4 \
+  just run-local >/tmp/thesis-flink-local-cli.log 2>&1
+grep -q "pipelineConfig source=simulator parallelism=2" /tmp/thesis-flink-local-cli.log
+grep -q "TopKResult{" /tmp/thesis-flink-local-cli.log
 
 echo "== package and docker image =="
 mvn -q -DskipTests package
@@ -63,7 +71,7 @@ echo "== algorithm performance benchmark =="
 mkdir -p reports/algorithm
 mvn -q -DskipTests compile exec:java \
   -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
-  -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=7 --partitions=$PARTITIONS --candidateMultiplier=$CANDIDATE_MULTIPLIER" \
+  -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=7 --partitions=$PARTITIONS --candidateMultiplier=$CANDIDATE_MULTIPLIER --synopsisBins=$SYNOPSIS_BINS" \
   > reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
 tail -n 8 reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
 
@@ -80,6 +88,8 @@ DATASET="$DATASET" \
 DATASET_PATH="$DATASET_PATH" \
 MAX_EVENTS="$MAX_EVENTS" \
 EXPECTED_MESSAGES="$EXPECTED_MESSAGES" \
+PARALLELISM="$PARALLELISM" \
+SYNOPSIS_BINS="$SYNOPSIS_BINS" \
 BUILD_IMAGE=0 \
 scripts/e2e-benchmark.sh
 
@@ -103,6 +113,8 @@ if ! curl -fsS http://localhost:8088/api/tests/status >/dev/null 2>&1; then
 fi
 curl -fsS http://localhost:8088/ >/tmp/thesis-monitor.html
 grep -q "Thesis Stream Monitor" /tmp/thesis-monitor.html
+grep -q "Imputation MAE" /tmp/thesis-monitor.html
+grep -q "DD Synopsis Rules" /tmp/thesis-monitor.html
 curl -fsS http://localhost:8088/api/metrics >/tmp/thesis-monitor-metrics.json
 python3 -m json.tool /tmp/thesis-monitor-metrics.json >/dev/null
 python3 - <<'PY'
@@ -114,6 +126,9 @@ required = ["mqtt", "kafka", "flink", "accuracy", "issues"]
 missing = [key for key in required if key not in payload]
 if missing:
   raise SystemExit(f"missing monitor JSON keys: {missing}")
+for key in ["synopsisRules", "imputationHoldoutMae"]:
+  if payload["accuracy"].get(key) is None:
+    raise SystemExit(f"missing monitor accuracy metric: {key}")
 PY
 curl -fsS http://localhost:8088/api/tests/status | python3 -m json.tool >/dev/null
 

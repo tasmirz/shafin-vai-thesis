@@ -1,11 +1,13 @@
 package com.thesis.topk.benchmark;
 
+import com.thesis.topk.algorithm.DdImputationSynopsis;
 import com.thesis.topk.algorithm.ImputationEngine;
 import com.thesis.topk.algorithm.ProbabilisticTopK;
 import com.thesis.topk.dataset.DatasetProviders;
 import com.thesis.topk.model.CandidateScore;
 import com.thesis.topk.model.ProbabilisticInstance;
 import com.thesis.topk.model.QueryPoint;
+import com.thesis.topk.model.RawEvent;
 import com.thesis.topk.simulator.Args;
 import com.thesis.topk.simulator.SimulationConfig;
 import com.thesis.topk.simulator.SimulationData;
@@ -25,10 +27,14 @@ public final class TopKBenchmark {
     SimulationConfig config = parsed.simulationConfig();
     int candidateMultiplier = parsed.intValue("candidateMultiplier", 4);
     int partitions = parsed.intValue("partitions", 4);
+    int synopsisBins = parsed.intValue("synopsisBins", 8);
     String dataset = parsed.stringValue("dataset", "synthetic");
     SimulationData data = DatasetProviders.byName(dataset).generate(config, parsed);
+    DataSplit split = holdoutSplit(data.events());
+    DdImputationSynopsis synopsis = DdImputationSynopsis.train(split.training(), synopsisBins);
+    DdImputationSynopsis.Evaluation imputation = synopsis.evaluate(split.holdout());
     List<ProbabilisticInstance> instances = new ArrayList<>();
-    data.events().forEach(event -> instances.addAll(ImputationEngine.impute(event, data.rules())));
+    data.events().forEach(event -> instances.addAll(ImputationEngine.impute(event, synopsis)));
 
     System.out.printf(
         "dataset provider=%s objects=%d events=%d instances=%d dimensions=%d queries=%d k=%d missingRate=%.3f "
@@ -45,6 +51,18 @@ public final class TopKBenchmark {
         config.seed(),
         partitions,
         partitions);
+    System.out.printf(
+        "imputationSynopsis rules=%d bins=%d avgCandidateCount=%.3f trainingEvents=%d "
+            + "holdoutEvents=%d evaluatedValues=%d holdoutMAE=%s%n",
+        synopsis.ruleCount(),
+        synopsis.bins(),
+        synopsis.averageEstimatedCandidateCount(),
+        split.training().size(),
+        split.holdout().size(),
+        imputation.evaluatedValues(),
+        Double.isNaN(imputation.meanAbsoluteError())
+            ? "n/a"
+            : String.format("%.6f", imputation.meanAbsoluteError()));
 
     double totalExactMs = 0.0;
     double totalCertifiedMs = 0.0;
@@ -187,6 +205,24 @@ public final class TopKBenchmark {
     return (double) hits / exact.size();
   }
 
+  private static DataSplit holdoutSplit(List<RawEvent> events) {
+    List<RawEvent> training = new ArrayList<>();
+    List<RawEvent> holdout = new ArrayList<>();
+    Map<String, Integer> seenByQuery = new java.util.LinkedHashMap<>();
+    for (RawEvent event : events) {
+      int index = seenByQuery.merge(event.queryId(), 1, Integer::sum);
+      if (index % 5 == 0) {
+        holdout.add(event);
+      } else {
+        training.add(event);
+      }
+    }
+    if (training.isEmpty()) {
+      training.addAll(events);
+    }
+    return new DataSplit(List.copyOf(training), List.copyOf(holdout));
+  }
+
   private record PartitionedRanking(
       List<CandidateScore> topK,
       int objectCount,
@@ -196,5 +232,10 @@ public final class TopKBenchmark {
     double communicationReduction() {
       return objectCount == 0 ? 0.0 : (double) prunedCount / objectCount;
     }
+  }
+
+  private record DataSplit(
+      List<RawEvent> training,
+      List<RawEvent> holdout) {
   }
 }
