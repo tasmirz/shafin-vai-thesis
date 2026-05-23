@@ -1,6 +1,6 @@
 # Paper-Informed Architecture Validation
 
-This report validates the implemented EMQX, Kafka, and Apache Flink architecture against the research motivation and selected query concepts in the supplied papers:
+This report was originally written for the EMQX/Kafka/Flink prototype. The upgraded repository now adds an Apache Spark-first execution path and validates it against the research motivation and selected query concepts in the supplied papers:
 
 - `papers/s10115-023-01917-3(Target Paper).pdf`: Distributed probabilistic top-k dominating queries over uncertain databases.
 - `papers/10295282.pdf`: Effective and efficient top-k query processing over incomplete data streams.
@@ -12,23 +12,23 @@ This report validates the implemented EMQX, Kafka, and Apache Flink architecture
 
 ## Positioning
 
-This project is **not** a reproduction of the papers' infrastructure or datasets. It proposes a replacement streaming architecture:
+This project is **not** a reproduction of the papers' infrastructure or datasets. It now proposes a Spark-first distributed PTD architecture, while retaining the older streaming files for reference:
 
 ```text
 Python data simulator/preprocessor
   -> EMQX MQTT ingress and Kafka actions
   -> Apache Kafka topic isolation
-  -> Apache Flink event-time processing
-  -> probabilistic top-k result monitoring
+  -> Apache Spark RDD candidate filtering/refinement
+  -> probabilistic top-k result reporting
 ```
 
-The papers motivate the incomplete-stream problem, probabilistic repair, and top-k/dominance evaluation. The implemented contribution is to execute an adapted processing path as an observable realtime event pipeline using EMQX, Kafka, Flink, Docker Compose, and Kubernetes.
+The papers motivate the incomplete-stream problem, probabilistic repair, and top-k/dominance evaluation. The implemented upgrade is to execute an adapted PTD processing path with Apache Spark while preserving the older EMQX/Kafka/Flink pipeline for comparison.
 
 Accordingly:
 
 - California road-network input is not required for this implementation.
-- Spark 3.0 and MapReduce execution are not target runtime requirements.
-- aR-tree exchange and Spark shuffle metrics are not missing architecture components; they belong to approaches that this system replaces.
+- Hadoop MapReduce execution is no longer the target runtime; Spark is the upgraded execution layer.
+- aR-tree exchange is not reproduced; Spark object grouping and compact candidate records are used instead.
 - Paper metrics are used as conceptual references only where the implemented metric has equivalent meaning.
 
 ## Adopted Research Concepts
@@ -42,16 +42,16 @@ Accordingly:
 | Query-relative dynamic dominance | `DominanceScorer.dynamicallyDominates` evaluates distance from configured query points | Implemented |
 | Expected dominance ranking | `expectedDominanceScore` sums probability-weighted dominated mass per object | Implemented |
 | Candidate pruning and exact refinement | `ProbabilisticTopK` supports certified and fast candidate paths against its exact ranking baseline | Implemented and internally checked |
-| Continuous/stream processing objective | Flink keeps keyed sliding-window state and emits an updated top-k after each arrival/upsert/delete | Implemented |
-| Configurable distributed execution | Flink operator parallelism is a CLI/Kubernetes setting; Kubernetes default is `2` task slots across `2` TaskManagers | Implemented for selected architecture |
+| Spark distributed processing objective | Spark groups query/object partitions, computes candidate envelopes, prunes using kth-LB threshold, and refines survivors exactly | Implemented in `com.thesis.topk.spark` |
+| Configurable distributed execution | Spark partitions and master are CLI settings through `--partitions` and `--sparkMaster` | Implemented for Spark path |
 
 ## Intentional Architectural Replacements
 
 | Source-paper approach | Implemented replacement | Reason and validation target |
 | --- | --- | --- |
 | Offline/distributed database or MapReduce ingestion | EMQX MQTT ingress with Kafka producer actions | Accept live event feeds and validate ingress completeness and bridge failures |
-| Spark/MapReduce runtime | Apache Flink `2.2.0` DataStream processing | Execute stateful event-time streaming and validate job completion/output |
-| Paper-specific server communication or shuffle reporting | Kafka topic offsets, EMQX action metrics, E2E timing, and calculated candidate proxy | Measure the proposed architecture honestly without presenting proxies as Spark communication metrics |
+| Hadoop MapReduce runtime | Apache Spark RDD processing | Use in-memory distributed transformations for candidate filtering and refinement |
+| Paper-specific server communication or shuffle reporting | Spark compact object groups and candidate counts | Report compact shuffle-record proxy without claiming byte-equivalence to paper communication cost |
 | California road-network experimental source | Intel, Pump, Gas, synthetic, and extensible CSV provider interface | Focus on sensor-stream incomplete data available to this project |
 | Single benchmark input flow | Dataset-specific MQTT/Kafka topic isolation | Observe and process each source family independently |
 
@@ -69,21 +69,21 @@ For raw dataset execution, the simulator preprocesses each dataset and publishes
 
 EMQX is configured either through scripted REST API calls for Docker Compose tests or through the Kubernetes configuration manifest. Its Kafka actions forward MQTT payloads without altering the normalized event schema.
 
-### Flink Processing
+### Spark Processing
 
-The Flink application performs:
+The Spark application performs:
 
 ```text
-KafkaSource
-  -> RawEvent deserialization
-  -> event-time watermark assignment
-  -> cost-selected DD-style synopsis imputation
-  -> query-family keyed state
-  -> incremental sliding-window PTD-style top-k ranking
-  -> TopKResult output
+Parallelized RawEvent RDD
+  -> DD-style synopsis imputation
+  -> probabilistic-instance RDD
+  -> query/object grouping
+  -> DSCP threshold pruning
+  -> exact survivor refinement
+  -> per-query top-k output
 ```
 
-The current ranking semantic is PTD-style expected dynamic dominance. It is a deliberate implemented semantic for this architecture. PT-k possible-world probability can be considered as an additional operator in future work, but its absence does not make the EMQX/Kafka/Flink architecture invalid.
+The current ranking semantic is PTD-style expected dynamic dominance. It is a deliberate implemented semantic for this Spark upgrade. PT-k possible-world probability can be considered as an additional operator in future work.
 
 ## Validated Results
 
@@ -110,7 +110,7 @@ Interpretation:
 - `avgFastPrecisionAtK=1.000` is agreement with this implementation's exact expected-dominance baseline on the tested synthetic workload.
 - `holdoutMAE=0.169489` measures DD-style imputation against values masked from a deterministic synthetic holdout. It is not comparable to a paper F-score until a complete-record missingness protocol is run on real datasets.
 - `avgCandidateCommunicationReduction=0.600` and `avgPartitionedShuffleWriteProxyBytes=5120` are candidate-processing indicators, not measured Spark shuffle/network quantities.
-- The check validates internal ranking and pruning behavior for the Flink-oriented implementation.
+- The check validates internal ranking and pruning behavior for the analytics implementation; the upgraded Spark path is available through `just spark`.
 
 ### EMQX-Kafka-Flink Raw Dataset E2E Check
 
@@ -147,22 +147,22 @@ This validates the replacement architecture path: simulator preprocessing, per-d
 
 | Area | Valid claim | Claim not made |
 | --- | --- | --- |
-| Architecture | EMQX/Kafka/Flink pipeline executes raw incomplete events end to end | It reproduces the papers' MapReduce or Spark runtime |
+| Architecture | Spark pipeline executes probabilistic imputation, object grouping, DSCP pruning, and exact refinement | It reproduces every paper-specific Hadoop cluster detail |
 | Datasets | Intel, Pump, and Gas are accepted and isolated through ingress topics | California-road experiments are reproduced |
 | Ranking | Current PTD-style ranking is internally consistent against its exact baseline on tested data | Current score is identical to Topk-iDS PT-k/F-score semantics |
 | Imputation | Compact DD-style conditional histograms select repairs and expose holdout MAE | The full differential-dependency repository/cost model from prior proposals is reproduced |
-| Communication | Kafka/EMQX traffic and calculated candidate proxies are observable | Proxy bytes equal Spark Shuffle Write or paper communication cost |
+| Communication | Spark compact candidate records and candidate counts are observable | Proxy records equal exact Spark shuffle bytes or paper communication cost |
 | Accuracy | Pipeline completeness and internal pruning fidelity are measured | Paper-style ground-truth F-score has been measured |
 
 ## Remaining Work For This Architecture
 
-The remaining tasks below improve the proposed Flink architecture rather than reproduce an excluded implementation:
+The remaining tasks below improve the proposed Spark architecture:
 
 | Improvement | Reason |
 | --- | --- |
 | Preserve complete Intel/Pump/Gas records before simulated missingness and compute Precision/Recall/F-score | Add external accuracy evidence for the chosen ranking/imputation design |
 | Calibrate DD-style synopsis rules per dataset and run controlled real-data masking | Turn raw-data MAE/Precision@k into meaningful external accuracy evidence |
-| Execute and record Kubernetes scaling measurements beyond the Compose run at `parallelism=2` | Validate scaling and recovery of the selected Flink execution model |
+| Execute and record Spark cluster scaling measurements beyond `local[*]` | Validate scaling and recovery of the selected Spark execution model |
 | Measure Kafka/EMQX throughput over larger raw workloads and failure cases | Validate ingress robustness and realistic throughput |
 | Investigate broker-level `messages.dropped` while Kafka action success remains complete | Clarify the operational reliability metric presented in the GUI |
 | Optionally add PT-k operator mode | Enable a direct semantic comparison with Topk-iDS if required for analysis, without replacing the architecture |
@@ -171,8 +171,8 @@ The remaining tasks below improve the proposed Flink architecture rather than re
 
 The current result supports the following thesis statement:
 
-> This work replaces prior offline/Spark-oriented execution assumptions with an event-driven incomplete-data processing architecture built on EMQX MQTT ingress, Apache Kafka topic routing, and Apache Flink event-time analytics. The prototype validates per-dataset ingestion for Intel, Pump, and Gas streams, probabilistic repair and PTD-style top-k processing, realtime observability, and end-to-end execution completeness. Paper-derived concepts guide the analytics design; excluded paper infrastructure and datasets are not presented as replication requirements.
+> This work upgrades the prior Hadoop/MapReduce-oriented PTD direction into an Apache Spark execution layer for uncertain data. The prototype validates probabilistic repair, Spark object grouping, DSCP-style pruning, AES-style compact candidate records, exact survivor refinement, and top-k result reporting. Paper-derived concepts guide the analytics design; unreproduced paper infrastructure and datasets are not presented as replication requirements.
 
 The following statement should not be used:
 
-> This system reproduces the original papers' MapReduce, Spark, aR-tree, California-road, PT-k, or numerical benchmark experiments.
+> This system reproduces every original MapReduce, aR-tree, California-road, PT-k, or numerical benchmark experiment.

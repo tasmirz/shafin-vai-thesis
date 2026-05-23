@@ -1,14 +1,14 @@
-# Paper-Informed EMQX-Kafka-Flink Top-k Stream Task
+# Paper-Informed Apache Spark Top-k Dominance Task
 
-This project implements a compact Apache Flink DataStream prototype for probabilistic top-k ranking over imperfect stream data. The containerized runtime uses the official `apache/flink:2.2.0-scala_2.12` Docker image.
+This upgraded version implements an Apache Spark execution layer for probabilistic top-k ranking over uncertain and imperfect data. It is aligned with the 2025 ICCIT PTD paper direction by replacing the Hadoop/MapReduce-style execution layer with Spark RDD stages and keeping the same core ideas: probabilistic repair, query-relative dynamic dominance, DSCP-style bound pruning, AES-style compact object-level emission, and exact refinement of survivors.
 
-The implementation adapts selected incomplete-data/top-k concepts into a replacement streaming architecture:
+The implementation adapts selected incomplete-data/top-k concepts into a distributed Spark architecture:
 
 - incomplete raw records are repaired into probabilistic instances using a compact DD-style conditional-histogram synopsis;
 - ranking uses query-relative dynamic dominance;
 - local lower/upper score bounds prune obvious non-candidates;
 - exact refinement is retained for the surviving candidates;
-- keyed Flink window state updates rankings on arrivals and honors `UPSERT`/`DELETE` events;
+- Spark RDD object grouping computes candidate bounds, prunes by the DSCP threshold, and refines surviving objects exactly;
 - a pluggable dataset provider produces imperfect stream data for testing and benchmarking.
 
 ## Command Runner
@@ -28,13 +28,33 @@ just monitor-bg
 just test-all
 ```
 
+Spark-first commands added by this upgrade:
+
+```bash
+just spark
+OBJECTS=1000 QUERIES=2 DIMENSIONS=4 K=10 PARTITIONS=4 just spark
+mvn -q -DskipTests compile exec:java \
+  -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+  -Dexec.args="--dataset=synthetic --objects=1000 --queries=2 --dimensions=4 --k=10 --partitions=4 --sparkMaster=local[*]"
+```
+
 The recipes wrap the Maven, Docker Compose, curl, monitor, validation, benchmark, and Kubernetes commands used by the project.
 
 ## Architecture Position
 
-The current code replaces the papers' offline/Spark-oriented execution setting with an EMQX MQTT -> Kafka -> Flink event-streaming implementation. It adopts incomplete-record processing, probabilistic repair, dynamic-dominance ranking, and candidate refinement concepts, then validates them through this architecture. California road data, MapReduce/aR-tree execution, and Spark are not implementation requirements for the proposed system.
+The primary implementation is now Apache Spark. The Spark job in `src/main/java/com/thesis/topk/spark/` executes the PTD-style workflow as RDD transformations/actions:
 
-The detailed validation report is written to:
+```text
+Raw uncertain events
+  -> Spark parallel imputation into probabilistic instances
+  -> query/object grouping
+  -> distributed LB/UB candidate-bound computation
+  -> DSCP-style kth-LB threshold pruning
+  -> exact Spark refinement for surviving object groups
+  -> top-k result collection per query
+```
+
+The older EMQX/Kafka/Flink files remain in the repository for reference and comparison, but the required upgrade path is Spark-first. The detailed validation report is written to:
 
 ```text
 reports/validation/paper-alignment.md
@@ -46,7 +66,7 @@ The current EMQX/Kafka/Flink implementation report is written to:
 reports/implementation/emqx-kafka-flink-implementation-report.md
 ```
 
-The algorithm benchmark reports metrics of the implemented Flink-oriented analytics path:
+The algorithm benchmark reports metrics of the implemented analytics path:
 
 - exact baseline runtime;
 - certified pruning runtime and exact top-k agreement;
@@ -56,7 +76,7 @@ The algorithm benchmark reports metrics of the implemented Flink-oriented analyt
 - partitioned candidate refinement and calculated shuffle-write proxy bytes.
 - masked-holdout imputation MAE and learned synopsis size.
 
-These metrics are reported for this architecture: Spark is not executing the benchmark and shuffle proxy values are not presented as Spark metrics. The implemented MAE evaluates masked holdout fields; ground-truth F-score/Precision@k over a controlled complete Intel/Pump/Gas input protocol remains an accuracy-evaluation extension.
+The Spark job reports raw events, probabilistic instances, refined/pruned object counts, compact shuffle-record proxy, and per-query top-k rankings. The implemented MAE evaluates masked holdout fields; ground-truth F-score/Precision@k over a controlled complete Intel/Pump/Gas input protocol remains an accuracy-evaluation extension.
 
 ## Run Tests
 
@@ -124,6 +144,18 @@ Run a small all-dataset E2E smoke test:
 
 ```bash
 DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 just e2e
+```
+
+## Run Local Spark Job On The JVM
+
+```bash
+OBJECTS=200 QUERIES=2 K=5 PARTITIONS=2 SYNOPSIS_BINS=8 just spark
+```
+
+The Spark entry point is:
+
+```text
+com.thesis.topk.spark.ProbabilisticTopKSparkJob
 ```
 
 ## Run Local Flink Job On The JVM

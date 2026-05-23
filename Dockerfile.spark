@@ -1,0 +1,7 @@
+FROM apache/spark:3.5.3
+
+USER root
+WORKDIR /opt/spark/work-dir
+COPY target/probabilistic-topk-spark-1.0.0-SNAPSHOT-shaded.jar /opt/spark/app/topk-spark.jar
+
+ENTRYPOINT ["/opt/spark/bin/spark-submit", "--class", "com.thesis.topk.spark.ProbabilisticTopKSparkJob", "/opt/spark/app/topk-spark.jar"]

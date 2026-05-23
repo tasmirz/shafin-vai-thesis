@@ -42,6 +42,10 @@ simulator-test: venv
 package:
     mvn -q -DskipTests package
 
+# build the Apache Spark based runtime image
+spark-image: package
+    docker build -f Dockerfile.spark -t thesis-topk-spark:local .
+
 # build the Apache Flink based runtime image
 image: package
     docker build -t {{ image }} .
@@ -58,6 +62,16 @@ image-check: image
 config-check:
     docker compose -f {{ compose_file }} config >/dev/null
     python3 -c 'from pathlib import Path; import yaml; docs=[doc for doc in yaml.safe_load_all(Path("k8s/pipeline.yaml").read_text()) if doc]; assert docs, "k8s/pipeline.yaml contains no resources"; print(f"k8s resources: {len(docs)}")'
+
+# run the Spark upgraded job locally
+spark:
+    mkdir -p reports/spark
+    JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED" \
+      mvn -q -DskipTests compile exec:java \
+      -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+      -Dexec.args="--dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*]" \
+      > reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
+    tail -n 12 reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
 
 # run the algorithm-only performance benchmark
 bench:
