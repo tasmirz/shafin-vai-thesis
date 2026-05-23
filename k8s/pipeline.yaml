@@ -1,0 +1,403 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: thesis-streaming
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: thesis-streaming
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: thesis-streaming
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9092
+              name: broker
+            - containerPort: 9093
+              name: controller
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "controller,broker"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@kafka:9093"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_LOG_DIRS
+              value: "/kafka/kraft-combined-logs"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /kafka
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: emqx-config
+  namespace: thesis-streaming
+data:
+  emqx.conf: |
+    node {
+      cookie = "thesis-streaming-cookie"
+      data_dir = "/opt/emqx/data"
+    }
+
+    listeners.tcp.default {
+      bind = "0.0.0.0:1883"
+    }
+
+    dashboard.listeners.http {
+      bind = 18083
+    }
+
+    connectors.kafka_producer.kafka_ingress {
+      enable = true
+      bootstrap_hosts = "kafka:9092"
+    }
+
+    actions.kafka_producer.raw_intel_to_kafka {
+      enable = true
+      connector = "kafka_ingress"
+      parameters {
+        topic = "thesis.raw.intel"
+        message {
+          key = "${clientid}"
+          value = "${payload}"
+        }
+      }
+    }
+
+    actions.kafka_producer.raw_pump_to_kafka {
+      enable = true
+      connector = "kafka_ingress"
+      parameters {
+        topic = "thesis.raw.pump"
+        message {
+          key = "${clientid}"
+          value = "${payload}"
+        }
+      }
+    }
+
+    actions.kafka_producer.raw_gas_to_kafka {
+      enable = true
+      connector = "kafka_ingress"
+      parameters {
+        topic = "thesis.raw.gas"
+        message {
+          key = "${clientid}"
+          value = "${payload}"
+        }
+      }
+    }
+
+    rule_engine.rules.mqtt_raw_intel_to_kafka {
+      enable = true
+      sql = "SELECT payload, clientid, topic, timestamp FROM \"thesis/raw/intel\""
+      actions = ["kafka_producer:raw_intel_to_kafka"]
+    }
+
+    rule_engine.rules.mqtt_raw_pump_to_kafka {
+      enable = true
+      sql = "SELECT payload, clientid, topic, timestamp FROM \"thesis/raw/pump\""
+      actions = ["kafka_producer:raw_pump_to_kafka"]
+    }
+
+    rule_engine.rules.mqtt_raw_gas_to_kafka {
+      enable = true
+      sql = "SELECT payload, clientid, topic, timestamp FROM \"thesis/raw/gas\""
+      actions = ["kafka_producer:raw_gas_to_kafka"]
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx
+  namespace: thesis-streaming
+spec:
+  selector:
+    app: emqx
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+    - name: dashboard
+      port: 18083
+      targetPort: 18083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emqx
+  namespace: thesis-streaming
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: emqx
+  template:
+    metadata:
+      labels:
+        app: emqx
+    spec:
+      containers:
+        - name: emqx
+          image: emqx/emqx-enterprise:5.8.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 1883
+              name: mqtt
+            - containerPort: 18083
+              name: dashboard
+          volumeMounts:
+            - name: emqx-config
+              mountPath: /opt/emqx/etc/emqx.conf
+              subPath: emqx.conf
+      volumes:
+        - name: emqx-config
+          configMap:
+            name: emqx-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incomplete-data-publisher
+  namespace: thesis-streaming
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incomplete-data-publisher
+  template:
+    metadata:
+      labels:
+        app: incomplete-data-publisher
+    spec:
+      containers:
+        - name: publisher
+          image: thesis-topk:local
+          imagePullPolicy: IfNotPresent
+          command:
+            - java
+            - -cp
+            - /opt/flink/usrlib/topk.jar
+          args:
+            - com.thesis.topk.ingress.MqttIncompleteDataPublisher
+            - --mqttUrl=tcp://emqx:1883
+            - --dataset=all
+            - --datasetPath=
+            - --objects=500
+            - --dimensions=4
+            - --queries=2
+            - --missingRate=0.35
+            - --ratePerSecond=25
+            - --repeat=0
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flink-config
+  namespace: thesis-streaming
+  labels:
+    app: flink
+data:
+  config.yaml: |+
+    jobmanager.rpc.address: flink-jobmanager
+    taskmanager.numberOfTaskSlots: 2
+    blob.server.port: 6124
+    jobmanager.rpc.port: 6123
+    taskmanager.rpc.port: 6122
+    jobmanager.memory.process.size: 1600m
+    taskmanager.memory.process.size: 1728m
+    parallelism.default: 1
+    classloader.check-leaked-classloader: false
+  log4j-console.properties: |+
+    rootLogger.level = INFO
+    rootLogger.appenderRef.console.ref = ConsoleAppender
+    rootLogger.appenderRef.rolling.ref = RollingFileAppender
+    logger.kafka.name = org.apache.kafka
+    logger.kafka.level = INFO
+    logger.pekko.name = org.apache.pekko
+    logger.pekko.level = INFO
+    appender.console.name = ConsoleAppender
+    appender.console.type = CONSOLE
+    appender.console.layout.type = PatternLayout
+    appender.console.layout.pattern = %d{yyyy-MM-dd HH:mm:ss,SSS} %-5p %-60c %x - %m%n
+    appender.rolling.name = RollingFileAppender
+    appender.rolling.type = RollingFile
+    appender.rolling.append = false
+    appender.rolling.fileName = ${sys:log.file}
+    appender.rolling.filePattern = ${sys:log.file}.%i
+    appender.rolling.layout.type = PatternLayout
+    appender.rolling.layout.pattern = %d{yyyy-MM-dd HH:mm:ss,SSS} %-5p %-60c %x - %m%n
+    appender.rolling.policies.type = Policies
+    appender.rolling.policies.size.type = SizeBasedTriggeringPolicy
+    appender.rolling.policies.size.size = 100MB
+    appender.rolling.strategy.type = DefaultRolloverStrategy
+    appender.rolling.strategy.max = 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager
+  namespace: thesis-streaming
+spec:
+  type: ClusterIP
+  selector:
+    app: flink
+    component: jobmanager
+  ports:
+    - name: rpc
+      port: 6123
+      targetPort: 6123
+    - name: blob-server
+      port: 6124
+      targetPort: 6124
+    - name: webui
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flink-jobmanager
+  namespace: thesis-streaming
+spec:
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: jobmanager
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: jobmanager
+          image: thesis-topk:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6123
+              name: rpc
+            - containerPort: 6124
+              name: blob-server
+            - containerPort: 8081
+              name: webui
+          args:
+            - standalone-job
+            - --job-classname
+            - com.thesis.topk.flink.ProbabilisticTopKJob
+            - --source=kafka
+            - --kafkaBootstrap=kafka:9092
+            - --kafkaGroupId=probabilistic-topk-k8s
+            - --dataset=all
+            - --datasetPath=
+            - --objects=500
+            - --dimensions=4
+            - --queries=2
+            - --missingRate=0.35
+            - --windowMs=10000
+          livenessProbe:
+            tcpSocket:
+              port: 6123
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          volumeMounts:
+            - name: flink-config-volume
+              mountPath: /opt/flink/conf
+      volumes:
+        - name: flink-config-volume
+          configMap:
+            name: flink-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+              - key: log4j-console.properties
+                path: log4j-console.properties
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: thesis-streaming
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flink
+      component: taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: taskmanager
+    spec:
+      containers:
+        - name: taskmanager
+          image: thesis-topk:local
+          imagePullPolicy: IfNotPresent
+          args:
+            - taskmanager
+          ports:
+            - containerPort: 6122
+              name: rpc
+          livenessProbe:
+            tcpSocket:
+              port: 6122
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          volumeMounts:
+            - name: flink-config-volume
+              mountPath: /opt/flink/conf
+      volumes:
+        - name: flink-config-volume
+          configMap:
+            name: flink-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+              - key: log4j-console.properties
+                path: log4j-console.properties

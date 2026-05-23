@@ -1,0 +1,58 @@
+# Probabilistic Top-k Flink Simulator Todo List
+
+## 1. Project Scaffold
+
+- [x] Create a Maven Java project for a Flink DataStream implementation.
+- [x] Pin Java, Flink, JUnit, AssertJ, and logging dependencies.
+- [x] Add executable entry points for the Flink job, simulator, and benchmark harness.
+
+## 2. Paper-Grounded Domain Model
+
+- [x] Define raw stream events with event time, query id, attributes, missing flags, and operation type.
+- [x] Define differential-dependency-style imputation rules.
+- [x] Define probabilistic instances emitted after imputation.
+- [x] Define candidate scores, score bounds, and top-k result records.
+
+## 3. Dataset Providers And Synthetic Data
+
+- [x] Generate deterministic synthetic stream events with configurable object count, dimensions, missing-rate, query count, and seed.
+- [x] Generate dummy imputation rules and query points.
+- [x] Support imperfect data with missing attributes and probabilistic repairs.
+- [x] Add a pluggable dataset provider interface.
+- [x] Add a CSV provider so real datasets can be adapted into the synthetic-data maker later.
+
+## 4. Core Algorithm
+
+- [x] Implement missing-value imputation that emits probabilistic instances.
+- [x] Implement dynamic dominance-style score computation relative to a query point.
+- [x] Implement lower/upper bound estimation for pruning.
+- [x] Implement local candidate pruning and exact refinement.
+- [x] Implement top-k selection with deterministic tie-breaking.
+
+## 5. Flink Streaming Job
+
+- [x] Build a DataStream topology with event-time watermarks.
+- [x] Add a keyed imputation stage.
+- [x] Add a keyed candidate generation/refinement stage using state and event-time timers.
+- [x] Emit continuous top-k results to stdout for local execution.
+
+## 6. Testing
+
+- [x] Add unit tests for imputation.
+- [x] Add unit tests for dominance scoring and top-k ordering.
+- [x] Add unit tests for pruning correctness against exact ranking.
+- [x] Add unit tests for simulator determinism.
+
+## 7. Benchmarking
+
+- [x] Add a command-line benchmark that compares exact all-to-all ranking with pruned ranking.
+- [x] Report records processed, candidate count, prune ratio, exact runtime, pruned runtime, and top-k agreement.
+- [x] Report Spark 3.0/4-node-aligned partitioned candidate refinement, shuffle-write proxy bytes, communication reduction, and precision@k.
+
+## 8. Verification
+
+- [x] Run the full Maven test suite.
+- [x] Run the benchmark harness on dummy data.
+- [x] Fix any compile, test, or benchmark failures.
+- [x] Convert stream-facing records to Flink-friendly POJOs after Java 25 exposed Kryo/module-access issues.
+- [x] Run Dockerized MQTT -> EMQX -> Kafka -> Flink E2E validation from the CLI.

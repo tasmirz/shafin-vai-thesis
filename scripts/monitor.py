@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import json
+import os
+import re
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+COMPOSE_FILE = os.environ.get("COMPOSE_FILE", str(ROOT / "docker-compose.e2e.yml"))
+EMQX_URL = os.environ.get("EMQX_URL", "http://localhost:18084")
+EMQX_USER = os.environ.get("EMQX_USER", "admin")
+EMQX_PASSWORD = os.environ.get("EMQX_PASSWORD", "public")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "thesis.raw.incomplete")
+TOPIC_MAPPINGS = os.environ.get("TOPIC_MAPPINGS", "")
+ACTION_ID = os.environ.get("ACTION_ID", "kafka_producer:raw_incomplete_to_kafka")
+ACTION_IDS = [x for x in os.environ.get("ACTION_IDS", ACTION_ID).split(",") if x]
+CONNECTOR_ID = os.environ.get("CONNECTOR_ID", "kafka_producer:kafka_ingress")
+RULE_ID = os.environ.get("RULE_ID", "mqtt_raw_to_kafka")
+FLINK_LOG = ROOT / os.environ.get("FLINK_LOG", "reports/e2e/flink.log")
+FLINK_REST_URL = os.environ.get("FLINK_REST_URL", "http://localhost:8081")
+SUMMARY_CSV = ROOT / os.environ.get("SUMMARY_CSV", "reports/e2e/summary.csv")
+ALGORITHM_REPORT = ROOT / os.environ.get("ALGORITHM_REPORT", "reports/algorithm/topk-200x2.txt")
+
+TOKEN = None
+TOKEN_TIME = 0.0
+
+
+def run(cmd, timeout=8):
+  try:
+    result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=timeout, check=False)
+    if result.returncode != 0:
+      return {"ok": False, "stdout": result.stdout, "stderr": result.stderr.strip()}
+    return {"ok": True, "stdout": result.stdout, "stderr": result.stderr.strip()}
+  except Exception as exc:
+    return {"ok": False, "stdout": "", "stderr": str(exc)}
+
+
+def http_json(path, method="GET", body=None, auth=True):
+  global TOKEN, TOKEN_TIME
+  headers = {"content-type": "application/json"}
+  if auth:
+    if not TOKEN or time.time() - TOKEN_TIME > 300:
+      payload = json.dumps({"username": EMQX_USER, "password": EMQX_PASSWORD}).encode()
+      req = urllib.request.Request(f"{EMQX_URL}/api/v5/login", data=payload, method="POST", headers=headers)
+      with urllib.request.urlopen(req, timeout=5) as resp:
+        TOKEN = json.loads(resp.read().decode())["token"]
+        TOKEN_TIME = time.time()
+    headers["Authorization"] = f"Bearer {TOKEN}"
+  data = json.dumps(body).encode() if body is not None else None
+  api_path = path if path.startswith("/api/v5/") else f"/api/v5{path}"
+  req = urllib.request.Request(f"{EMQX_URL}{api_path}", data=data, method=method, headers=headers)
+  try:
+    with urllib.request.urlopen(req, timeout=5) as resp:
+      raw = resp.read().decode()
+      return json.loads(raw) if raw else {}
+  except urllib.error.HTTPError as exc:
+    return {"error": f"http {exc.code}", "body": exc.read().decode(errors="replace")}
+  except Exception as exc:
+    return {"error": str(exc)}
+
+
+def kafka_offset():
+  topics = kafka_topics()
+  topic_pattern = ".*" if len(topics) > 1 else topics[0]
+  res = run([
+    "docker", "compose", "-f", COMPOSE_FILE, "exec", "-T", "kafka",
+    "/opt/kafka/bin/kafka-get-offsets.sh",
+    "--bootstrap-server", "kafka:9092",
+    "--topic", topic_pattern,
+  ])
+  if not res["ok"]:
+    return {"messages": 0, "error": res["stderr"] or res["stdout"]}
+  total = 0
+  for line in res["stdout"].splitlines():
+    parts = line.strip().split(":")
+    if len(parts) == 3 and parts[0] in topics and parts[2].isdigit():
+      total += int(parts[2])
+  return {"messages": total, "raw": res["stdout"].strip()}
+
+
+def kafka_topics():
+  if TOPIC_MAPPINGS:
+    return [item.split("=", 1)[1] for item in TOPIC_MAPPINGS.split(",") if "=" in item]
+  return [KAFKA_TOPIC]
+
+
+def emqx_actions():
+  metrics = {}
+  total = {}
+  for action_id in ACTION_IDS:
+    payload = http_json(f"/actions/{action_id}/metrics")
+    metrics[action_id] = payload
+    values = payload.get("metrics", payload) if isinstance(payload, dict) else {}
+    for key, value in values.items() if isinstance(values, dict) else []:
+      if isinstance(value, (int, float)):
+        total[key] = total.get(key, 0) + value
+  total["actions"] = metrics
+  return total
+
+
+def parse_summary():
+  if not SUMMARY_CSV.exists():
+    return {}
+  with SUMMARY_CSV.open(newline="") as f:
+    rows = list(csv.DictReader(f))
+  return rows[-1] if rows else {}
+
+
+def parse_flink_log():
+  if not FLINK_LOG.exists():
+    return {"topKResults": 0, "errors": 0, "warnings": 0}
+  text = FLINK_LOG.read_text(errors="replace")
+  return {
+    "topKResults": len(re.findall(r"TopKResult\{", text)),
+    "errors": len(re.findall(r"\\b(ERROR|Exception)\\b", text)),
+    "warnings": len(re.findall(r"\\bWARN\\b", text)),
+    "path": str(FLINK_LOG.relative_to(ROOT)),
+  }
+
+
+def flink_rest(path):
+  req = urllib.request.Request(f"{FLINK_REST_URL}{path}")
+  try:
+    with urllib.request.urlopen(req, timeout=4) as resp:
+      return json.loads(resp.read().decode())
+  except Exception as exc:
+    return {"error": str(exc)}
+
+
+def flink_cluster():
+  overview = flink_rest("/overview")
+  jobs = flink_rest("/jobs/overview")
+  counts = {"running": 0, "finished": 0, "failed": 0, "canceled": 0}
+  if isinstance(jobs, dict):
+    for job in jobs.get("jobs", []):
+      state = str(job.get("state", "")).lower()
+      if state in counts:
+        counts[state] += 1
+  return {"overview": overview, "jobs": jobs, "jobCounts": counts}
+
+
+def parse_algorithm():
+  if not ALGORITHM_REPORT.exists():
+    return {"agreement": None, "queries": 0}
+  text = ALGORITHM_REPORT.read_text(errors="replace")
+  agreements = re.findall(r"topKAgreement=(true|false)", text)
+  prune = [float(x) for x in re.findall(r"certifiedPruneRatio=([0-9.]+)", text)]
+  if not prune:
+    prune = [float(x) for x in re.findall(r"pruneRatio=([0-9.]+)", text)]
+  fast_precision = [float(x) for x in re.findall(r"fastPrecisionAtK=([0-9.]+)", text)]
+  comm_reduction = [float(x) for x in re.findall(r"candidateCommunicationReduction=([0-9.]+)", text)]
+  partitioned_precision = [float(x) for x in re.findall(r"partitionedPrecisionAtK=([0-9.]+)", text)]
+  partitioned_reduction = [float(x) for x in re.findall(r"partitionedCommunicationReduction=([0-9.]+)", text)]
+  shuffle_write = [float(x) for x in re.findall(r"partitionedShuffleWriteBytes=([0-9.]+)", text)]
+  exact = [float(x) for x in re.findall(r"exactMs=([0-9.]+)", text)]
+  pruned = [float(x) for x in re.findall(r"certifiedPrunedMs=([0-9.]+)", text)]
+  if not pruned:
+    pruned = [float(x) for x in re.findall(r"prunedMs=([0-9.]+)", text)]
+  true_count = sum(1 for value in agreements if value == "true")
+  return {
+    "agreement": (true_count / len(agreements)) if agreements else None,
+    "queries": len(agreements),
+    "avgPruneRatio": (sum(prune) / len(prune)) if prune else None,
+    "avgFastPrecisionAtK": (sum(fast_precision) / len(fast_precision)) if fast_precision else None,
+    "avgCommunicationReduction": (sum(comm_reduction) / len(comm_reduction)) if comm_reduction else None,
+    "avgPartitionedPrecisionAtK": (sum(partitioned_precision) / len(partitioned_precision)) if partitioned_precision else None,
+    "avgPartitionedCommunicationReduction": (sum(partitioned_reduction) / len(partitioned_reduction)) if partitioned_reduction else None,
+    "avgPartitionedShuffleWriteBytes": (sum(shuffle_write) / len(shuffle_write)) if shuffle_write else None,
+    "avgExactMs": (sum(exact) / len(exact)) if exact else None,
+    "avgPrunedMs": (sum(pruned) / len(pruned)) if pruned else None,
+  }
+
+
+def metrics():
+  emqx_metrics = http_json("/metrics")
+  emqx_stats = http_json("/stats")
+  action_totals = emqx_actions()
+  connector = http_json(f"/connectors/{CONNECTOR_ID}")
+  rule_metrics = http_json(f"/rules/{RULE_ID}/metrics")
+  kafka = kafka_offset()
+  flink = parse_flink_log()
+  flink_status = flink_cluster()
+  summary = parse_summary()
+  algorithm = parse_algorithm()
+
+  mqtt_received = 0
+  mqtt_dropped = 0
+  if isinstance(emqx_metrics, list):
+    mqtt_received = sum(item.get("messages.publish", 0) for item in emqx_metrics if isinstance(item, dict))
+    mqtt_dropped = sum(item.get("messages.dropped", 0) for item in emqx_metrics if isinstance(item, dict))
+
+  expected = int(summary.get("expected_messages") or summary.get("expectedMessages") or 0)
+  kafka_messages = int(kafka.get("messages", 0))
+  topk = int(flink.get("topKResults", 0))
+  processing_completeness = (topk / kafka_messages) if kafka_messages else None
+  ingestion_completeness = (kafka_messages / expected) if expected else None
+
+  issues = []
+  if connector.get("status") not in (None, "connected"):
+    issues.append(f"connector status: {connector.get('status')}")
+  if action_totals.get("failed", 0):
+    issues.append(f"action failures: {action_totals.get('failed')}")
+  if action_totals.get("dropped", 0):
+    issues.append(f"action dropped: {action_totals.get('dropped')}")
+  if flink.get("errors", 0):
+    issues.append(f"flink log errors/exceptions: {flink.get('errors')}")
+  if flink_status.get("overview", {}).get("error"):
+    issues.append(f"flink rest: {flink_status['overview']['error']}")
+  if expected and kafka_messages < expected:
+    issues.append(f"kafka has {kafka_messages}/{expected} expected records")
+
+  return {
+    "timestamp": int(time.time() * 1000),
+    "mqtt": {"published": mqtt_received, "dropped": mqtt_dropped, "stats": emqx_stats},
+    "kafka": kafka,
+    "emqx": {
+      "connector": {"status": connector.get("status"), "name": connector.get("name")},
+      "action": action_totals,
+      "rule": rule_metrics.get("metrics", {}) if isinstance(rule_metrics, dict) else {},
+    },
+    "flink": {**flink, **flink_status},
+    "accuracy": {
+      "algorithmAgreement": algorithm.get("agreement"),
+      "processingCompleteness": processing_completeness,
+      "ingestionCompleteness": ingestion_completeness,
+      "avgPruneRatio": algorithm.get("avgPruneRatio"),
+      "avgFastPrecisionAtK": algorithm.get("avgFastPrecisionAtK"),
+      "avgCommunicationReduction": algorithm.get("avgCommunicationReduction"),
+      "avgPartitionedPrecisionAtK": algorithm.get("avgPartitionedPrecisionAtK"),
+      "avgPartitionedCommunicationReduction": algorithm.get("avgPartitionedCommunicationReduction"),
+      "avgPartitionedShuffleWriteBytes": algorithm.get("avgPartitionedShuffleWriteBytes"),
+      "avgExactMs": algorithm.get("avgExactMs"),
+      "avgPrunedMs": algorithm.get("avgPrunedMs"),
+      "algorithmQueries": algorithm.get("queries"),
+    },
+    "summary": summary,
+    "issues": issues,
+  }
+
+
+def assert_at_least(name, actual, expected, failures):
+  if expected is None:
+    return
+  if actual is None or actual < expected:
+    failures.append(f"{name} expected >= {expected}, got {actual}")
+
+
+def check_metrics(payload, args):
+  failures = []
+  assert_at_least("mqtt.published", payload["mqtt"].get("published"), args.expect_mqtt, failures)
+  assert_at_least("kafka.messages", payload["kafka"].get("messages"), args.expect_kafka, failures)
+  assert_at_least("flink.topKResults", payload["flink"].get("topKResults"), args.expect_topk, failures)
+  assert_at_least(
+      "accuracy.ingestionCompleteness",
+      payload["accuracy"].get("ingestionCompleteness"),
+      args.min_ingestion_completeness,
+      failures)
+  assert_at_least(
+      "accuracy.processingCompleteness",
+      payload["accuracy"].get("processingCompleteness"),
+      args.min_processing_completeness,
+      failures)
+  assert_at_least(
+      "flink.jobCounts.finished",
+      payload["flink"].get("jobCounts", {}).get("finished"),
+      args.expect_finished_jobs,
+      failures)
+  if args.require_no_issues and payload.get("issues"):
+    failures.append(f"issues present: {payload['issues']}")
+  return failures
+
+
+def print_metrics_summary(payload):
+  print(
+      "monitor "
+      f"mqtt={payload['mqtt'].get('published', 0)} "
+      f"kafka={payload['kafka'].get('messages', 0)} "
+      f"topK={payload['flink'].get('topKResults', 0)} "
+      f"ingestion={payload['accuracy'].get('ingestionCompleteness')} "
+      f"processing={payload['accuracy'].get('processingCompleteness')} "
+      f"flinkFinishedJobs={payload['flink'].get('jobCounts', {}).get('finished', 0)} "
+      f"issues={len(payload.get('issues', []))}")
+
+
+INDEX = r"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thesis Stream Monitor</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f6f7f9; color: #17202a; }
+    header { background: #17202a; color: #fff; padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    main { padding: 18px; max-width: 1440px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 12px; }
+    .card { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+    .label { color: #5f6b7a; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .value { font-size: 28px; font-weight: 750; margin-top: 8px; overflow-wrap: anywhere; }
+    .sub { color: #667085; font-size: 13px; margin-top: 6px; }
+    .wide { grid-column: span 2; }
+    canvas { width: 100%; height: 220px; display: block; }
+    .ok { color: #087443; }
+    .warn { color: #b54708; }
+    .bad { color: #b42318; }
+    .issues { margin: 0; padding-left: 18px; }
+    code { background: #eef1f5; padding: 2px 5px; border-radius: 4px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); } .wide { grid-column: span 2; } }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .wide { grid-column: span 1; } header { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Thesis Stream Monitor</h1>
+    <div id="status">Connecting...</div>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="card"><div class="label">MQTT Ingress</div><div class="value" id="mqtt">0</div><div class="sub">published messages</div></div>
+      <div class="card"><div class="label">Kafka Ingress</div><div class="value" id="kafka">0</div><div class="sub">topic offset</div></div>
+      <div class="card"><div class="label">Flink Outgress</div><div class="value" id="flink">0</div><div class="sub">TopKResult rows</div></div>
+      <div class="card"><div class="label">Bridge Status</div><div class="value" id="bridge">unknown</div><div class="sub" id="bridgeSub">Kafka action</div></div>
+      <div class="card"><div class="label">Ingestion Completeness</div><div class="value" id="ingAcc">n/a</div><div class="sub">Kafka / expected</div></div>
+      <div class="card"><div class="label">Processing Completeness</div><div class="value" id="procAcc">n/a</div><div class="sub">Flink / Kafka</div></div>
+      <div class="card"><div class="label">Top-k Agreement</div><div class="value" id="agreement">n/a</div><div class="sub">algorithm benchmark</div></div>
+      <div class="card"><div class="label">Prune Ratio</div><div class="value" id="prune">n/a</div><div class="sub">algorithm benchmark</div></div>
+      <div class="card"><div class="label">Partitioned Precision</div><div class="value" id="partitionedPrecision">n/a</div><div class="sub">4-node benchmark</div></div>
+      <div class="card"><div class="label">Shuffle Write</div><div class="value" id="shuffleWrite">n/a</div><div class="sub">candidate bytes</div></div>
+      <div class="card wide"><div class="label">Throughput</div><canvas id="chart"></canvas></div>
+      <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Flink log: <code>reports/e2e/flink.log</code></div></div>
+    </section>
+  </main>
+<script>
+const history = [];
+const $ = id => document.getElementById(id);
+const pct = x => x == null ? "n/a" : `${(x * 100).toFixed(1)}%`;
+function draw() {
+  const canvas = $("chart"), ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(320, rect.width * devicePixelRatio);
+  canvas.height = 220 * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, rect.width, 220);
+  const pad = 28, w = rect.width - pad * 2, h = 160;
+  const max = Math.max(1, ...history.flatMap(p => [p.mqtt, p.kafka, p.flink]));
+  ctx.strokeStyle = "#d0d5dd"; ctx.beginPath(); ctx.moveTo(pad, 180); ctx.lineTo(pad + w, 180); ctx.stroke();
+  [["mqtt","#2563eb"],["kafka","#0f766e"],["flink","#b54708"]].forEach(([key,color]) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    history.forEach((p, i) => {
+      const x = pad + (history.length === 1 ? 0 : i * w / (history.length - 1));
+      const y = 180 - (p[key] / max) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+  ctx.fillStyle = "#344054"; ctx.font = "12px sans-serif";
+  ctx.fillText("MQTT", pad, 204); ctx.fillStyle = "#2563eb"; ctx.fillRect(pad + 38, 196, 18, 3);
+  ctx.fillStyle = "#344054"; ctx.fillText("Kafka", pad + 70, 204); ctx.fillStyle = "#0f766e"; ctx.fillRect(pad + 112, 196, 18, 3);
+  ctx.fillStyle = "#344054"; ctx.fillText("Flink", pad + 144, 204); ctx.fillStyle = "#b54708"; ctx.fillRect(pad + 184, 196, 18, 3);
+}
+async function tick() {
+  try {
+    const r = await fetch("/api/metrics", {cache: "no-store"});
+    const m = await r.json();
+    $("status").textContent = new Date(m.timestamp).toLocaleTimeString();
+    $("mqtt").textContent = m.mqtt.published ?? 0;
+    $("kafka").textContent = m.kafka.messages ?? 0;
+    $("flink").textContent = m.flink.topKResults ?? 0;
+    $("bridge").textContent = m.emqx.connector.status || "unknown";
+    $("bridge").className = `value ${m.emqx.connector.status === "connected" ? "ok" : "bad"}`;
+    $("bridgeSub").textContent = `success ${m.emqx.action.success ?? 0}, failed ${m.emqx.action.failed ?? 0}, dropped ${m.emqx.action.dropped ?? 0}`;
+    $("ingAcc").textContent = pct(m.accuracy.ingestionCompleteness);
+    $("procAcc").textContent = pct(m.accuracy.processingCompleteness);
+    $("agreement").textContent = pct(m.accuracy.algorithmAgreement);
+    $("prune").textContent = pct(m.accuracy.avgPruneRatio);
+    $("partitionedPrecision").textContent = pct(m.accuracy.avgPartitionedPrecisionAtK);
+    $("shuffleWrite").textContent = m.accuracy.avgPartitionedShuffleWriteBytes == null ? "n/a" : Math.round(m.accuracy.avgPartitionedShuffleWriteBytes).toLocaleString();
+    const issues = $("issues"); issues.innerHTML = "";
+    (m.issues.length ? m.issues : ["No current issues detected"]).forEach(issue => {
+      const li = document.createElement("li"); li.textContent = issue; issues.appendChild(li);
+    });
+    history.push({mqtt: m.mqtt.published || 0, kafka: m.kafka.messages || 0, flink: m.flink.topKResults || 0});
+    while (history.length > 80) history.shift();
+    draw();
+  } catch (e) {
+    $("status").textContent = `monitor error: ${e.message}`;
+  }
+}
+setInterval(tick, 2000); tick();
+</script>
+</body>
+</html>
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+  def do_GET(self):
+    if self.path == "/" or self.path.startswith("/?"):
+      self.send_response(200)
+      self.send_header("content-type", "text/html; charset=utf-8")
+      self.end_headers()
+      self.wfile.write(INDEX.encode())
+      return
+    if self.path == "/api/metrics":
+      payload = json.dumps(metrics(), indent=2).encode()
+      self.send_response(200)
+      self.send_header("content-type", "application/json")
+      self.send_header("cache-control", "no-store")
+      self.end_headers()
+      self.wfile.write(payload)
+      return
+    self.send_response(404)
+    self.end_headers()
+
+  def log_message(self, fmt, *args):
+    return
+
+
+def main():
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--port", type=int, default=8088)
+  parser.add_argument("--once", action="store_true", help="print one metrics sample and exit")
+  parser.add_argument("--json", action="store_true", help="print full JSON in --once mode")
+  parser.add_argument("--expect-mqtt", type=int)
+  parser.add_argument("--expect-kafka", type=int)
+  parser.add_argument("--expect-topk", type=int)
+  parser.add_argument("--expect-finished-jobs", type=int)
+  parser.add_argument("--min-ingestion-completeness", type=float)
+  parser.add_argument("--min-processing-completeness", type=float)
+  parser.add_argument("--require-no-issues", action="store_true")
+  args = parser.parse_args()
+  if args.once:
+    payload = metrics()
+    if args.json:
+      print(json.dumps(payload, indent=2))
+    else:
+      print_metrics_summary(payload)
+    failures = check_metrics(payload, args)
+    if failures:
+      for failure in failures:
+        print(f"FAIL {failure}")
+      raise SystemExit(1)
+    return
+  server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+  print(f"monitor=http://localhost:{args.port}")
+  server.serve_forever()
+
+
+if __name__ == "__main__":
+  main()
