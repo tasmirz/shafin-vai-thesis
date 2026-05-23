@@ -68,6 +68,8 @@ wait_for_flink() {
 
 cd "$ROOT_DIR"
 
+"$ROOT_DIR/scripts/setup-venv.sh" >/dev/null
+
 if [[ "$BUILD_IMAGE" == "1" || "$BUILD_IMAGE" == "true" ]]; then
   mvn -q -DskipTests package
   docker build -t thesis-topk:local "$ROOT_DIR"

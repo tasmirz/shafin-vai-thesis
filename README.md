@@ -17,6 +17,8 @@ Use the `Justfile` as the main CLI entry point:
 ```bash
 just
 just test
+just venv
+just simulator-test
 just bench
 just run-local
 just e2e
@@ -37,14 +39,22 @@ The detailed validation report is written to:
 reports/validation/paper-alignment.md
 ```
 
-The algorithm benchmark reports paper-style metrics:
+The current EMQX/Kafka/Flink implementation report is written to:
+
+```text
+reports/implementation/emqx-kafka-flink-implementation-report.md
+```
+
+The algorithm benchmark reports prototype metrics shaped for later paper comparison:
 
 - exact baseline runtime;
 - certified pruning runtime and exact top-k agreement;
 - fast candidate-pruning runtime;
-- precision@k against exact ranking;
-- candidate communication reduction;
-- partitioned 4-node candidate refinement, shuffle-write proxy bytes, and partitioned precision@k for Spark 3.0 benchmark alignment.
+- precision@k against this implementation's exact ranking;
+- candidate communication-reduction proxy;
+- partitioned candidate refinement and calculated shuffle-write proxy bytes.
+
+These metrics are not paper-matching numerical results yet: Spark is not executing the benchmark, shuffle write is not measured from Spark metrics, and Topk-iDS F-score against retained complete-data ground truth is not implemented. See the validation report for the comparability decision.
 
 ## Run Tests
 
@@ -93,7 +103,14 @@ objectId,queryId,eventTime,opType,a0,a1,a2,...
 
 For Docker Compose or Kubernetes runs, `DATASET_PATH` must be a path visible inside the container, so mount the dataset file or bake it into the image before switching the runtime from `synthetic` to `csv`.
 
-The sender performs dataset preprocessing before publishing. With `DATASET=all`, each raw dataset is published to a separate MQTT topic and bridged to a separate Kafka topic:
+The sender is decoupled from the Flink Java job in [scripts/simulator.py](scripts/simulator.py). It performs dataset preprocessing in Python before publishing normalized JSON records. Set up its isolated dependencies and test all built-in preprocessors with:
+
+```bash
+just venv
+just simulator-test
+```
+
+With `DATASET=all`, each raw dataset is published to a separate MQTT topic and bridged to a separate Kafka topic:
 
 ```text
 thesis/raw/intel -> thesis.raw.intel
@@ -124,7 +141,7 @@ Incomplete records are JSON messages shaped like:
 {"objectId":"obj-1","queryId":"q0","eventTime":1700000000000,"opType":"UPSERT","attributes":[0.42,null,0.7],"missingMask":[false,true,false]}
 ```
 
-Run the MQTT publisher against a local broker:
+Run the Python MQTT publisher against a local broker:
 
 ```bash
 OBJECTS=200 QUERIES=2 MISSING_RATE=0.35 just publish-local
@@ -176,7 +193,7 @@ Start and configure the local Docker-backed services with scripts and EMQX HTTP 
 just setup
 ```
 
-This builds `thesis-topk:local` from `apache/flink:2.2.0-scala_2.12`, starts Kafka, EMQX, Flink JobManager, and Flink TaskManager, creates the Kafka topic, then calls `scripts/configure-emqx.sh`, which uses `curl` against the EMQX dashboard API to create:
+This builds `thesis-topk:local` from `apache/flink:2.2.0-scala_2.12`, creates `.venv` for the Python simulator, starts Kafka, EMQX, Flink JobManager, and Flink TaskManager, creates the Kafka topic, then calls `scripts/configure-emqx.sh`, which uses `curl` against the EMQX dashboard API to create:
 
 - Kafka producer connector: `kafka_ingress`
 - Kafka producer action: `raw_incomplete_to_kafka`
@@ -211,7 +228,7 @@ Open:
 http://localhost:8088
 ```
 
-The monitor polls EMQX, Kafka, and Flink output and shows MQTT ingress, Kafka ingress, Flink outgress, bridge failures/drops, completeness, top-k agreement, prune ratio, and current issues.
+The monitor polls EMQX, Kafka, and Flink output and shows MQTT ingress, per-topic Kafka traffic, Flink outgress, bridge failures/drops, completeness, top-k agreement, prune ratio, and current issues. Its **Run Full CLI Tests** and **Run Raw Topics E2E** controls start CLI test jobs and stream the verbose log in the page.
 
 Test the monitor metrics from the CLI:
 
@@ -231,4 +248,18 @@ Run the full verification suite, including unit tests, Docker image build, compo
 OBJECTS=200 QUERIES=2 DIMENSIONS=4 K=10 MISSING_RATE=0.35 \
 RATE_PER_SECOND=200 QOS=0 WINDOW_MS=10000 \
 just test-all
+```
+
+Keep the verbose run log used by the GUI:
+
+```bash
+just test-all-verbose
+```
+
+For Kubernetes, build both local images before applying the manifest:
+
+```bash
+just image
+just simulator-image
+just k8s-apply
 ```

@@ -17,7 +17,10 @@ WINDOW_MS="${WINDOW_MS:-10000}"
 SEED="${SEED:-7}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
-MAX_EVENTS="${MAX_EVENTS:-$((OBJECTS * QUERIES))}"
+MAX_EVENTS="${MAX_EVENTS:-0}"
+if ((MAX_EVENTS <= 0)); then
+  MAX_EVENTS=$((OBJECTS * QUERIES))
+fi
 INGRESS_READY_SLEEP_SECONDS="${INGRESS_READY_SLEEP_SECONDS:-10}"
 KAFKA_WAIT_SECONDS="${KAFKA_WAIT_SECONDS:-300}"
 if [[ "$DATASET" == "all" ]]; then
@@ -98,21 +101,21 @@ sleep "$INGRESS_READY_SLEEP_SECONDS"
 
 echo "Publishing $EXPECTED_MESSAGES incomplete records to MQTT..."
 publish_start_ms="$(now_ms)"
-java -cp target/probabilistic-topk-flink-1.0.0-SNAPSHOT-shaded.jar \
-  com.thesis.topk.ingress.MqttIncompleteDataPublisher \
-  --mqttUrl=tcp://localhost:18884 \
+scripts/setup-venv.sh >/dev/null
+.venv/bin/python scripts/simulator.py \
+  --mqtt-host=localhost \
+  --mqtt-port=18884 \
   --topic="$MQTT_TOPIC" \
   --dataset="$DATASET" \
-  --datasetPath="$DATASET_PATH" \
+  --dataset-path="$DATASET_PATH" \
   --objects="$OBJECTS" \
   --dimensions="$DIMENSIONS" \
   --queries="$QUERIES" \
-  --k="$K" \
-  --missingRate="$MISSING_RATE" \
-  --ratePerSecond="$RATE_PER_SECOND" \
+  --missing-rate="$MISSING_RATE" \
+  --rate-per-second="$RATE_PER_SECOND" \
   --qos="$QOS" \
   --repeat=1 \
-  --maxEvents="$MAX_EVENTS" \
+  --max-events="$MAX_EVENTS" \
   --seed="$SEED"
 publish_end_ms="$(now_ms)"
 
@@ -186,7 +189,7 @@ cat >"$SUMMARY" <<EOF
 Pipeline:
 
 \`\`\`text
-MqttIncompleteDataPublisher -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Flink bounded Kafka source -> TopKResult
+PythonSimulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Flink bounded Kafka source -> TopKResult
 \`\`\`
 
 Config:
@@ -222,8 +225,8 @@ Artifacts:
 EOF
 
 cat >"$CSV" <<EOF
-objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s
-$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$flink_ms,$total_ms,$publish_rate,$end_to_end_rate
+objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
+$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$flink_ms,$total_ms,$publish_rate,$end_to_end_rate,$DATASET,"$TOPIC_MAPPINGS"
 EOF
 
 cat "$SUMMARY"

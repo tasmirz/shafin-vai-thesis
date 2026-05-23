@@ -32,7 +32,8 @@ public final class TopKBenchmark {
 
     System.out.printf(
         "dataset provider=%s objects=%d events=%d instances=%d dimensions=%d queries=%d k=%d missingRate=%.3f "
-            + "seed=%d partitions=%d sparkVersion=3.0 clusterNodes=4%n",
+            + "seed=%d partitions=%d executionEngine=java-local partitionModelNodes=%d "
+            + "shuffleMetric=calculated-candidate-proxy%n",
         dataset,
         config.objects(),
         data.events().size(),
@@ -42,6 +43,7 @@ public final class TopKBenchmark {
         config.k(),
         config.missingRate(),
         config.seed(),
+        partitions,
         partitions);
 
     double totalExactMs = 0.0;
@@ -104,7 +106,7 @@ public final class TopKBenchmark {
           "query=%s exactMs=%.3f certifiedPrunedMs=%.3f fastCandidateMs=%.3f "
               + "candidates=%d certifiedRefined=%d fastRefined=%d certifiedPruned=%d fastPruned=%d "
               + "certifiedPruneRatio=%.3f fastPruneRatio=%.3f candidateCommunicationReduction=%.3f "
-              + "partitionedRefined=%d partitionedPruned=%d partitionedShuffleWriteBytes=%d "
+              + "partitionedRefined=%d partitionedPruned=%d partitionedShuffleWriteProxyBytes=%d "
               + "partitionedCommunicationReduction=%.3f topKAgreement=%s fastPrecisionAtK=%.3f "
               + "partitionedPrecisionAtK=%.3f%n",
           query.getKey(),
@@ -132,7 +134,7 @@ public final class TopKBenchmark {
       System.out.printf(
           "summary avgExactMs=%.3f avgCertifiedPrunedMs=%.3f avgFastCandidateMs=%.3f "
               + "avgCertifiedPruneRatio=%.3f avgFastPruneRatio=%.3f avgCandidateCommunicationReduction=%.3f "
-              + "avgFastPrecisionAtK=%.3f avgPartitionedShuffleWriteBytes=%.0f "
+              + "avgFastPrecisionAtK=%.3f avgPartitionedShuffleWriteProxyBytes=%.0f "
               + "avgPartitionedCommunicationReduction=%.3f avgPartitionedPrecisionAtK=%.3f%n",
           totalExactMs / queryCount,
           totalCertifiedMs / queryCount,

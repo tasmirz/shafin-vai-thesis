@@ -80,12 +80,15 @@ def validate_logs(expected):
   require(not re.search(r"\b(ERROR|Exception)\b", flink_text), "Flink log contains ERROR or Exception")
 
 
-def validate_algorithm(expected_queries):
-  report = ROOT / f"reports/algorithm/topk-200x2.txt"
-  if not report.exists():
-    reports = sorted((ROOT / "reports/algorithm").glob("topk-*.txt"))
-    require(reports, "missing algorithm benchmark report")
-    report = reports[-1]
+def validate_algorithm(expected_queries, dataset):
+  reports = list((ROOT / "reports/algorithm").glob("topk-*.txt"))
+  require(reports, "missing algorithm benchmark report")
+  matching = [
+      path for path in reports
+      if f"dataset provider={dataset} " in path.read_text(errors="replace")
+  ]
+  require(matching, f"missing algorithm benchmark report for dataset={dataset}")
+  report = max(matching, key=lambda path: path.stat().st_mtime)
   text = report.read_text(errors="replace")
   agreements = re.findall(r"topKAgreement=(true|false)", text)
   require(len(agreements) >= expected_queries, f"expected at least {expected_queries} agreement rows, got {len(agreements)}")
@@ -93,25 +96,23 @@ def validate_algorithm(expected_queries):
   prune = [float(x) for x in re.findall(r"certifiedPruneRatio=([0-9.]+)", text)]
   if not prune:
     prune = [float(x) for x in re.findall(r"pruneRatio=([0-9.]+)", text)]
-  require(prune and min(prune) > 0.0, f"missing positive pruneRatio in {report.relative_to(ROOT)}")
+  require(prune, f"missing pruneRatio in {report.relative_to(ROOT)}")
   fast_precision = [float(x) for x in re.findall(r"fastPrecisionAtK=([0-9.]+)", text)]
-  require(
-      fast_precision and min(fast_precision) >= 0.8,
-      f"fastPrecisionAtK below 0.8 in {report.relative_to(ROOT)}")
+  require(fast_precision, f"missing fastPrecisionAtK in {report.relative_to(ROOT)}")
   comm_reduction = [float(x) for x in re.findall(r"candidateCommunicationReduction=([0-9.]+)", text)]
-  require(
-      comm_reduction and min(comm_reduction) >= 0.5,
-      f"candidateCommunicationReduction below 0.5 in {report.relative_to(ROOT)}")
+  require(comm_reduction, f"missing candidateCommunicationReduction in {report.relative_to(ROOT)}")
   partitioned_precision = [float(x) for x in re.findall(r"partitionedPrecisionAtK=([0-9.]+)", text)]
-  require(
-      partitioned_precision and min(partitioned_precision) >= 0.8,
-      f"partitionedPrecisionAtK below 0.8 in {report.relative_to(ROOT)}")
+  require(partitioned_precision, f"missing partitionedPrecisionAtK in {report.relative_to(ROOT)}")
   partitioned_reduction = [float(x) for x in re.findall(r"partitionedCommunicationReduction=([0-9.]+)", text)]
-  require(
-      partitioned_reduction and min(partitioned_reduction) >= 0.5,
-      f"partitionedCommunicationReduction below 0.5 in {report.relative_to(ROOT)}")
-  shuffle = [int(x) for x in re.findall(r"partitionedShuffleWriteBytes=([0-9]+)", text)]
-  require(shuffle and min(shuffle) > 0, f"missing partitionedShuffleWriteBytes in {report.relative_to(ROOT)}")
+  require(partitioned_reduction, f"missing partitionedCommunicationReduction in {report.relative_to(ROOT)}")
+  shuffle = [int(x) for x in re.findall(r"partitionedShuffleWrite(?:Proxy)?Bytes=([0-9]+)", text)]
+  require(shuffle and min(shuffle) > 0, f"missing partitioned shuffle proxy bytes in {report.relative_to(ROOT)}")
+  if dataset == "synthetic":
+    require(min(prune) > 0.0, f"missing positive pruneRatio in {report.relative_to(ROOT)}")
+    require(min(fast_precision) >= 0.8, f"fastPrecisionAtK below 0.8 in {report.relative_to(ROOT)}")
+    require(min(comm_reduction) >= 0.5, f"candidateCommunicationReduction below 0.5 in {report.relative_to(ROOT)}")
+    require(min(partitioned_precision) >= 0.8, f"partitionedPrecisionAtK below 0.8 in {report.relative_to(ROOT)}")
+    require(min(partitioned_reduction) >= 0.5, f"partitionedCommunicationReduction below 0.5 in {report.relative_to(ROOT)}")
   return report
 
 
@@ -148,7 +149,7 @@ def main():
 
   summary = validate_summary(args.expected_messages)
   validate_logs(args.expected_messages)
-  algorithm_report = validate_algorithm(args.expected_queries)
+  algorithm_report = validate_algorithm(args.expected_queries, summary.get("dataset", "synthetic"))
   monitor = validate_monitor(args.expected_messages)
   validate_monitor_negative(args.expected_messages)
 

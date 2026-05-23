@@ -1,2 +1,2 @@
-objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s
-100,2,4,10,0.35,0,200,200,200,1913,3505,9294,12801,104.55,15.62
+objects,queries,dimensions,k,missing_rate,mqtt_qos,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,flink_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
+5,1,4,2,0.2,0,15,15,15,548,1678,3884,5563,27.37,2.70,all,"thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"

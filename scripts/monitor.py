@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -18,17 +19,21 @@ EMQX_USER = os.environ.get("EMQX_USER", "admin")
 EMQX_PASSWORD = os.environ.get("EMQX_PASSWORD", "public")
 KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "thesis.raw.incomplete")
 TOPIC_MAPPINGS = os.environ.get("TOPIC_MAPPINGS", "")
-ACTION_ID = os.environ.get("ACTION_ID", "kafka_producer:raw_incomplete_to_kafka")
+ACTION_ID = os.environ.get("ACTION_ID", "kafka_producer:raw_incomplete_to_kafka_thesis_raw")
 ACTION_IDS = [x for x in os.environ.get("ACTION_IDS", ACTION_ID).split(",") if x]
 CONNECTOR_ID = os.environ.get("CONNECTOR_ID", "kafka_producer:kafka_ingress")
-RULE_ID = os.environ.get("RULE_ID", "mqtt_raw_to_kafka")
+RULE_ID = os.environ.get("RULE_ID", "mqtt_raw_to_kafka_thesis_raw")
 FLINK_LOG = ROOT / os.environ.get("FLINK_LOG", "reports/e2e/flink.log")
 FLINK_REST_URL = os.environ.get("FLINK_REST_URL", "http://localhost:8081")
 SUMMARY_CSV = ROOT / os.environ.get("SUMMARY_CSV", "reports/e2e/summary.csv")
-ALGORITHM_REPORT = ROOT / os.environ.get("ALGORITHM_REPORT", "reports/algorithm/topk-200x2.txt")
+ALGORITHM_REPORT_ENV = os.environ.get("ALGORITHM_REPORT")
+TEST_LOG = ROOT / "reports/tests/latest.log"
 
 TOKEN = None
 TOKEN_TIME = 0.0
+TEST_LOCK = threading.Lock()
+TEST_PROCESS = None
+TEST_STATE = {"state": "idle", "profile": None, "startedAt": None, "finishedAt": None, "returnCode": None}
 
 
 def run(cmd, timeout=8):
@@ -60,13 +65,17 @@ def http_json(path, method="GET", body=None, auth=True):
       raw = resp.read().decode()
       return json.loads(raw) if raw else {}
   except urllib.error.HTTPError as exc:
+    if exc.code == 401 and auth:
+      TOKEN = None
+      TOKEN_TIME = 0.0
+      return http_json(path, method=method, body=body, auth=auth)
     return {"error": f"http {exc.code}", "body": exc.read().decode(errors="replace")}
   except Exception as exc:
     return {"error": str(exc)}
 
 
-def kafka_offset():
-  topics = kafka_topics()
+def kafka_offset(topics=None):
+  topics = topics or kafka_topics()
   topic_pattern = ".*" if len(topics) > 1 else topics[0]
   res = run([
     "docker", "compose", "-f", COMPOSE_FILE, "exec", "-T", "kafka",
@@ -77,11 +86,14 @@ def kafka_offset():
   if not res["ok"]:
     return {"messages": 0, "error": res["stderr"] or res["stdout"]}
   total = 0
+  by_topic = {}
   for line in res["stdout"].splitlines():
     parts = line.strip().split(":")
     if len(parts) == 3 and parts[0] in topics and parts[2].isdigit():
-      total += int(parts[2])
-  return {"messages": total, "raw": res["stdout"].strip()}
+      count = int(parts[2])
+      total += count
+      by_topic[parts[0]] = by_topic.get(parts[0], 0) + count
+  return {"messages": total, "byTopic": by_topic, "raw": res["stdout"].strip()}
 
 
 def kafka_topics():
@@ -90,10 +102,10 @@ def kafka_topics():
   return [KAFKA_TOPIC]
 
 
-def emqx_actions():
+def emqx_actions(action_ids=None):
   metrics = {}
   total = {}
-  for action_id in ACTION_IDS:
+  for action_id in action_ids or ACTION_IDS:
     payload = http_json(f"/actions/{action_id}/metrics")
     metrics[action_id] = payload
     values = payload.get("metrics", payload) if isinstance(payload, dict) else {}
@@ -118,8 +130,8 @@ def parse_flink_log():
   text = FLINK_LOG.read_text(errors="replace")
   return {
     "topKResults": len(re.findall(r"TopKResult\{", text)),
-    "errors": len(re.findall(r"\\b(ERROR|Exception)\\b", text)),
-    "warnings": len(re.findall(r"\\bWARN\\b", text)),
+    "errors": len(re.findall(r"\b(ERROR|Exception)\b", text)),
+    "warnings": len(re.findall(r"\bWARN\b", text)),
     "path": str(FLINK_LOG.relative_to(ROOT)),
   }
 
@@ -146,9 +158,14 @@ def flink_cluster():
 
 
 def parse_algorithm():
-  if not ALGORITHM_REPORT.exists():
+  if ALGORITHM_REPORT_ENV:
+    report = ROOT / ALGORITHM_REPORT_ENV
+  else:
+    reports = list((ROOT / "reports/algorithm").glob("topk-*.txt"))
+    report = max(reports, key=lambda path: path.stat().st_mtime) if reports else ROOT / "reports/algorithm/topk-none.txt"
+  if not report.exists():
     return {"agreement": None, "queries": 0}
-  text = ALGORITHM_REPORT.read_text(errors="replace")
+  text = report.read_text(errors="replace")
   agreements = re.findall(r"topKAgreement=(true|false)", text)
   prune = [float(x) for x in re.findall(r"certifiedPruneRatio=([0-9.]+)", text)]
   if not prune:
@@ -157,7 +174,10 @@ def parse_algorithm():
   comm_reduction = [float(x) for x in re.findall(r"candidateCommunicationReduction=([0-9.]+)", text)]
   partitioned_precision = [float(x) for x in re.findall(r"partitionedPrecisionAtK=([0-9.]+)", text)]
   partitioned_reduction = [float(x) for x in re.findall(r"partitionedCommunicationReduction=([0-9.]+)", text)]
-  shuffle_write = [float(x) for x in re.findall(r"partitionedShuffleWriteBytes=([0-9.]+)", text)]
+  shuffle_write = [
+      float(x)
+      for x in re.findall(r"partitionedShuffleWrite(?:Proxy)?Bytes=([0-9.]+)", text)
+  ]
   exact = [float(x) for x in re.findall(r"exactMs=([0-9.]+)", text)]
   pruned = [float(x) for x in re.findall(r"certifiedPrunedMs=([0-9.]+)", text)]
   if not pruned:
@@ -178,15 +198,22 @@ def parse_algorithm():
 
 
 def metrics():
+  summary = parse_summary()
+  is_all = summary.get("dataset") == "all"
+  topics = ["thesis.raw.intel", "thesis.raw.pump", "thesis.raw.gas"] if is_all else kafka_topics()
+  action_ids = [
+      "kafka_producer:raw_incomplete_to_kafka_thesis_raw_intel",
+      "kafka_producer:raw_incomplete_to_kafka_thesis_raw_pump",
+      "kafka_producer:raw_incomplete_to_kafka_thesis_raw_gas",
+  ] if is_all else ACTION_IDS
   emqx_metrics = http_json("/metrics")
   emqx_stats = http_json("/stats")
-  action_totals = emqx_actions()
+  action_totals = emqx_actions(action_ids)
   connector = http_json(f"/connectors/{CONNECTOR_ID}")
   rule_metrics = http_json(f"/rules/{RULE_ID}/metrics")
-  kafka = kafka_offset()
+  kafka = kafka_offset(topics)
   flink = parse_flink_log()
   flink_status = flink_cluster()
-  summary = parse_summary()
   algorithm = parse_algorithm()
 
   mqtt_received = 0
@@ -288,6 +315,71 @@ def print_metrics_summary(payload):
       f"issues={len(payload.get('issues', []))}")
 
 
+def tail_text(path, max_chars=16000):
+  if not path.exists():
+    return ""
+  text = path.read_text(errors="replace")
+  return text[-max_chars:]
+
+
+def test_status():
+  with TEST_LOCK:
+    payload = dict(TEST_STATE)
+  payload["log"] = tail_text(TEST_LOG)
+  return payload
+
+
+def _wait_for_test(process):
+  code = process.wait()
+  with TEST_LOCK:
+    TEST_STATE["state"] = "passed" if code == 0 else "failed"
+    TEST_STATE["returnCode"] = code
+    TEST_STATE["finishedAt"] = int(time.time() * 1000)
+
+
+def start_test(profile):
+  global TEST_PROCESS
+  with TEST_LOCK:
+    if TEST_PROCESS is not None and TEST_PROCESS.poll() is None:
+      return False, dict(TEST_STATE)
+    TEST_LOG.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    if profile == "raw":
+      env.update({
+          "DATASET": "all",
+          "MAX_EVENTS": "5",
+          "EXPECTED_MESSAGES": "15",
+          "OBJECTS": "5",
+          "QUERIES": "1",
+          "K": "2",
+      })
+      command = [
+          "bash", "-lc",
+          "scripts/setup-venv.sh && "
+          "DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 "
+          "MISSING_RATE=0.2 RATE_PER_SECOND=200 QOS=0 WINDOW_MS=10000 BUILD_IMAGE=0 "
+          "scripts/e2e-benchmark.sh && "
+          "python3 scripts/validate-e2e.py --expected-messages 15 --expected-queries 2",
+      ]
+    else:
+      env.update({"OBJECTS": "100", "QUERIES": "2", "EXPECTED_MESSAGES": "200", "DATASET": "synthetic"})
+      profile = "default"
+      command = ["just", "test-all"]
+    log = TEST_LOG.open("w")
+    TEST_PROCESS = subprocess.Popen(
+        command, cwd=ROOT, env=env, text=True, stdout=log, stderr=subprocess.STDOUT)
+    log.close()
+    TEST_STATE.update({
+        "state": "running",
+        "profile": profile,
+        "startedAt": int(time.time() * 1000),
+        "finishedAt": None,
+        "returnCode": None,
+    })
+    threading.Thread(target=_wait_for_test, args=(TEST_PROCESS,), daemon=True).start()
+    return True, dict(TEST_STATE)
+
+
 INDEX = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -311,6 +403,11 @@ INDEX = r"""<!doctype html>
     .warn { color: #b54708; }
     .bad { color: #b42318; }
     .issues { margin: 0; padding-left: 18px; }
+    button { height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; padding: 0 12px; font-weight: 600; cursor: pointer; }
+    button.primary { background: #17202a; color: #fff; border-color: #17202a; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    pre { background: #101828; color: #e4e7ec; height: 280px; overflow: auto; padding: 12px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
     code { background: #eef1f5; padding: 2px 5px; border-radius: 4px; }
     @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); } .wide { grid-column: span 2; } }
     @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .wide { grid-column: span 1; } header { align-items: flex-start; flex-direction: column; } }
@@ -331,10 +428,12 @@ INDEX = r"""<!doctype html>
       <div class="card"><div class="label">Processing Completeness</div><div class="value" id="procAcc">n/a</div><div class="sub">Flink / Kafka</div></div>
       <div class="card"><div class="label">Top-k Agreement</div><div class="value" id="agreement">n/a</div><div class="sub">algorithm benchmark</div></div>
       <div class="card"><div class="label">Prune Ratio</div><div class="value" id="prune">n/a</div><div class="sub">algorithm benchmark</div></div>
-      <div class="card"><div class="label">Partitioned Precision</div><div class="value" id="partitionedPrecision">n/a</div><div class="sub">4-node benchmark</div></div>
-      <div class="card"><div class="label">Shuffle Write</div><div class="value" id="shuffleWrite">n/a</div><div class="sub">candidate bytes</div></div>
+      <div class="card"><div class="label">Partitioned Precision</div><div class="value" id="partitionedPrecision">n/a</div><div class="sub">4-partition model</div></div>
+      <div class="card"><div class="label">Shuffle Proxy</div><div class="value" id="shuffleWrite">n/a</div><div class="sub">calculated candidate bytes</div></div>
+      <div class="card wide"><div class="label">Topic Traffic</div><pre id="topics">Waiting for traffic...</pre></div>
       <div class="card wide"><div class="label">Throughput</div><canvas id="chart"></canvas></div>
       <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Flink log: <code>reports/e2e/flink.log</code></div></div>
+      <div class="card wide"><div class="label">CLI Test Runner</div><div class="actions"><button class="primary" id="runDefault">Run Full CLI Tests</button><button id="runRaw">Run Raw Topics E2E</button><span class="sub" id="testState">idle</span></div><pre id="testLog">No test run started.</pre></div>
     </section>
   </main>
 <script>
@@ -382,6 +481,7 @@ async function tick() {
     $("prune").textContent = pct(m.accuracy.avgPruneRatio);
     $("partitionedPrecision").textContent = pct(m.accuracy.avgPartitionedPrecisionAtK);
     $("shuffleWrite").textContent = m.accuracy.avgPartitionedShuffleWriteBytes == null ? "n/a" : Math.round(m.accuracy.avgPartitionedShuffleWriteBytes).toLocaleString();
+    $("topics").textContent = Object.entries(m.kafka.byTopic || {}).map(([topic, count]) => `${topic.padEnd(26)} ${count}`).join("\n") || "No topic offsets available.";
     const issues = $("issues"); issues.innerHTML = "";
     (m.issues.length ? m.issues : ["No current issues detected"]).forEach(issue => {
       const li = document.createElement("li"); li.textContent = issue; issues.appendChild(li);
@@ -393,7 +493,25 @@ async function tick() {
     $("status").textContent = `monitor error: ${e.message}`;
   }
 }
+async function pollTests() {
+  const result = await fetch("/api/tests/status", {cache: "no-store"});
+  const test = await result.json();
+  $("testState").textContent = test.state + (test.profile ? ` (${test.profile})` : "");
+  $("testState").className = `sub ${test.state === "passed" ? "ok" : test.state === "failed" ? "bad" : ""}`;
+  $("testLog").textContent = test.log || "No test output available.";
+  $("testLog").scrollTop = $("testLog").scrollHeight;
+  const running = test.state === "running";
+  $("runDefault").disabled = running;
+  $("runRaw").disabled = running;
+}
+async function runTests(profile) {
+  await fetch("/api/tests/run", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({profile})});
+  pollTests();
+}
+$("runDefault").onclick = () => runTests("default");
+$("runRaw").onclick = () => runTests("raw");
 setInterval(tick, 2000); tick();
+setInterval(pollTests, 1500); pollTests();
 </script>
 </body>
 </html>
@@ -413,6 +531,28 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("content-type", "application/json")
       self.send_header("cache-control", "no-store")
+      self.end_headers()
+      self.wfile.write(payload)
+      return
+    if self.path == "/api/tests/status":
+      payload = json.dumps(test_status(), indent=2).encode()
+      self.send_response(200)
+      self.send_header("content-type", "application/json")
+      self.send_header("cache-control", "no-store")
+      self.end_headers()
+      self.wfile.write(payload)
+      return
+    self.send_response(404)
+    self.end_headers()
+
+  def do_POST(self):
+    if self.path == "/api/tests/run":
+      length = int(self.headers.get("content-length", "0"))
+      request = json.loads(self.rfile.read(length) or b"{}")
+      started, state = start_test(request.get("profile", "default"))
+      payload = json.dumps(state).encode()
+      self.send_response(202 if started else 409)
+      self.send_header("content-type", "application/json")
       self.end_headers()
       self.wfile.write(payload)
       return

@@ -2,6 +2,7 @@ set dotenv-load
 
 compose_file := "docker-compose.e2e.yml"
 image := "thesis-topk:local"
+simulator_image := "thesis-simulator:local"
 objects := env_var_or_default("OBJECTS", "200")
 queries := env_var_or_default("QUERIES", "2")
 dimensions := env_var_or_default("DIMENSIONS", "4")
@@ -16,7 +17,7 @@ dataset := env_var_or_default("DATASET", "synthetic")
 dataset_path := env_var_or_default("DATASET_PATH", "")
 partitions := env_var_or_default("PARTITIONS", "4")
 candidate_multiplier := env_var_or_default("CANDIDATE_MULTIPLIER", "4")
-max_events := env_var_or_default("MAX_EVENTS", "")
+max_events := env_var_or_default("MAX_EVENTS", "0")
 
 # list available recipes
 default:
@@ -26,6 +27,15 @@ default:
 test:
     mvn test
 
+# create the isolated Python simulator environment
+venv:
+    scripts/setup-venv.sh
+
+# validate all Python simulator preprocessors without publishing
+simulator-test: venv
+    .venv/bin/python scripts/simulator.py --dataset=synthetic --objects=4 --queries=2 --max-events=8 --dry-run --json
+    .venv/bin/python scripts/simulator.py --dataset=all --max-events=2 --dry-run --json
+
 # package the shaded application jar
 package:
     mvn -q -DskipTests package
@@ -33,6 +43,10 @@ package:
 # build the Apache Flink based runtime image
 image: package
     docker build -t {{ image }} .
+
+# build the decoupled Python simulator image for Kubernetes
+simulator-image:
+    docker build -f docker/simulator/Dockerfile -t {{ simulator_image }} .
 
 # verify the runtime image contains Apache Flink 2.2.0
 image-check: image
@@ -61,9 +75,11 @@ run-local: package
 
 # publish generated incomplete records to a local MQTT broker
 publish-local:
-    mvn -q -DskipTests compile exec:java \
-      -Dexec.mainClass=com.thesis.topk.ingress.MqttIncompleteDataPublisher \
-      -Dexec.args="--dataset={{ dataset }} --datasetPath={{ dataset_path }} --mqttUrl=tcp://localhost:1883 --topic=thesis/raw --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --missingRate={{ missing_rate }} --ratePerSecond=20 --repeat=1"
+    just venv
+    .venv/bin/python scripts/simulator.py \
+      --dataset={{ dataset }} --dataset-path={{ dataset_path }} --mqtt-host=localhost --mqtt-port=1883 --topic=thesis/raw \
+      --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --missing-rate={{ missing_rate }} \
+      --rate-per-second=20 --repeat=1
 
 # run the Kafka-backed Flink job on the local JVM
 run-kafka-local: package
@@ -135,10 +151,12 @@ monitor:
 
 # start the realtime monitor GUI in the background
 monitor-bg:
-    if [ -f /tmp/thesis-monitor.pid ]; then kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true; fi
-    setsid env PORT={{ monitor_port }} scripts/monitor.sh >/tmp/thesis-monitor.log 2>&1 < /dev/null &
-    echo $! >/tmp/thesis-monitor.pid
-    echo "monitor=http://localhost:{{ monitor_port }}"
+    if [ -f /tmp/thesis-monitor.pid ]; then kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true; fi; \
+      fuser -k {{ monitor_port }}/tcp >/dev/null 2>&1 || true; \
+      setsid env PORT={{ monitor_port }} scripts/monitor.sh >/tmp/thesis-monitor.log 2>&1 < /dev/null & \
+      echo $! >/tmp/thesis-monitor.pid; \
+      sleep 1; \
+      echo "monitor=http://localhost:{{ monitor_port }}"
 
 # strictly validate latest E2E artifacts and live state
 validate expected=expected_messages:
@@ -163,6 +181,14 @@ test-all:
     PARTITIONS={{ partitions }} \
     CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
     scripts/test-all.sh
+
+# run full verification and preserve verbose console output for the GUI
+test-all-verbose:
+    mkdir -p reports/tests
+    set -o pipefail; OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
+      MISSING_RATE={{ missing_rate }} RATE_PER_SECOND={{ rate_per_second }} QOS={{ qos }} WINDOW_MS={{ window_ms }} \
+      DATASET={{ dataset }} DATASET_PATH={{ dataset_path }} PARTITIONS={{ partitions }} CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
+      scripts/test-all.sh 2>&1 | tee reports/tests/latest.log
 
 # show current Docker services
 ps:

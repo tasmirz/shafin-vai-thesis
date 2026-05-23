@@ -14,9 +14,24 @@ DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
 PARTITIONS="${PARTITIONS:-4}"
 CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
-EXPECTED_MESSAGES=$((OBJECTS * QUERIES))
+MAX_EVENTS="${MAX_EVENTS:-$((OBJECTS * QUERIES))}"
+if [[ "$DATASET" == "all" ]]; then
+  EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((MAX_EVENTS * 3))}"
+  MONITOR_ENV=(
+    "TOPIC_MAPPINGS=thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"
+    "ACTION_IDS=kafka_producer:raw_incomplete_to_kafka_thesis_raw_intel,kafka_producer:raw_incomplete_to_kafka_thesis_raw_pump,kafka_producer:raw_incomplete_to_kafka_thesis_raw_gas"
+  )
+else
+  EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((OBJECTS * QUERIES))}"
+  MONITOR_ENV=()
+fi
 
 cd "$ROOT_DIR"
+
+echo "== python simulator virtual environment and preprocessing =="
+scripts/setup-venv.sh
+.venv/bin/python scripts/simulator.py --dataset=synthetic --objects=4 --queries=2 --max-events=8 --dry-run --json
+.venv/bin/python scripts/simulator.py --dataset=all --max-events=2 --dry-run --json
 
 echo "== unit tests =="
 mvn test
@@ -25,6 +40,9 @@ echo "== package and docker image =="
 mvn -q -DskipTests package
 docker build -t thesis-topk:local .
 docker run --rm --entrypoint /opt/flink/bin/flink thesis-topk:local --version | grep -q "Version: 2.2.0"
+docker build -f docker/simulator/Dockerfile -t thesis-simulator:local .
+docker run --rm thesis-simulator:local --dataset=all --max-events=1 --dry-run --json >/tmp/thesis-simulator-image-check.json
+python3 -m json.tool /tmp/thesis-simulator-image-check.json >/dev/null
 
 echo "== compose config =="
 docker compose -f docker-compose.e2e.yml config >/dev/null
@@ -60,22 +78,25 @@ QOS="$QOS" \
 WINDOW_MS="$WINDOW_MS" \
 DATASET="$DATASET" \
 DATASET_PATH="$DATASET_PATH" \
+MAX_EVENTS="$MAX_EVENTS" \
+EXPECTED_MESSAGES="$EXPECTED_MESSAGES" \
 BUILD_IMAGE=0 \
 scripts/e2e-benchmark.sh
 
 echo "== monitor cli assertions =="
-EXPECTED_MESSAGES="$EXPECTED_MESSAGES" scripts/test-monitor-cli.sh
+env "${MONITOR_ENV[@]}" EXPECTED_MESSAGES="$EXPECTED_MESSAGES" scripts/test-monitor-cli.sh
 
 echo "== strict e2e artifact and live-state validation =="
-python3 scripts/validate-e2e.py \
+env "${MONITOR_ENV[@]}" python3 scripts/validate-e2e.py \
   --expected-messages "$EXPECTED_MESSAGES" \
   --expected-queries "$QUERIES"
 
 echo "== gui http smoke test =="
-if ! curl -fsS http://localhost:8088/api/metrics >/dev/null 2>&1; then
+if ! curl -fsS http://localhost:8088/api/tests/status >/dev/null 2>&1; then
   if [[ -f /tmp/thesis-monitor.pid ]]; then
     kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true
   fi
+  fuser -k 8088/tcp >/dev/null 2>&1 || true
   setsid env PORT=8088 scripts/monitor.sh >/tmp/thesis-monitor.log 2>&1 < /dev/null &
   echo $! >/tmp/thesis-monitor.pid
   sleep 1
@@ -94,5 +115,6 @@ missing = [key for key in required if key not in payload]
 if missing:
   raise SystemExit(f"missing monitor JSON keys: {missing}")
 PY
+curl -fsS http://localhost:8088/api/tests/status | python3 -m json.tool >/dev/null
 
 echo "all tests passed"

@@ -220,22 +220,17 @@ spec:
     spec:
       containers:
         - name: publisher
-          image: thesis-topk:local
+          image: thesis-simulator:local
           imagePullPolicy: IfNotPresent
-          command:
-            - java
-            - -cp
-            - /opt/flink/usrlib/topk.jar
           args:
-            - com.thesis.topk.ingress.MqttIncompleteDataPublisher
-            - --mqttUrl=tcp://emqx:1883
+            - --mqtt-host=emqx
+            - --mqtt-port=1883
             - --dataset=all
-            - --datasetPath=
             - --objects=500
             - --dimensions=4
             - --queries=2
-            - --missingRate=0.35
-            - --ratePerSecond=25
+            - --missing-rate=0.35
+            - --rate-per-second=25
             - --repeat=0
 ---
 apiVersion: v1
