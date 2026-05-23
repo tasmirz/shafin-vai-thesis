@@ -358,18 +358,22 @@ def _wait_for_test(process):
     TEST_STATE["finishedAt"] = int(time.time() * 1000)
 
 
-def start_test(profile):
+def start_test(profile, dataset="synthetic"):
   global TEST_PROCESS
   with TEST_LOCK:
     if TEST_PROCESS is not None and TEST_PROCESS.poll() is None:
       return False, dict(TEST_STATE)
     TEST_LOG.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    
+    topics = 3 if dataset == "all" else 1
     if profile == "raw":
+      max_events = 5
+      expected = max_events * topics
       env.update({
-          "DATASET": "all",
-          "MAX_EVENTS": "5",
-          "EXPECTED_MESSAGES": "15",
+          "DATASET": dataset,
+          "MAX_EVENTS": str(max_events),
+          "EXPECTED_MESSAGES": str(expected),
           "OBJECTS": "5",
           "QUERIES": "1",
           "K": "2",
@@ -377,14 +381,19 @@ def start_test(profile):
       command = [
           "bash", "-lc",
           "scripts/setup-venv.sh && "
-          "DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 "
+          f"DATASET={dataset} MAX_EVENTS={max_events} EXPECTED_MESSAGES={expected} OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 "
           "MISSING_RATE=0.2 RATE_PER_SECOND=200 QOS=0 BUILD_IMAGE=0 "
           "scripts/e2e-benchmark.sh && "
-          "python3 scripts/validate-e2e.py --expected-messages 15 --expected-queries 1",
+          f"python3 scripts/validate-e2e.py --expected-messages {expected} --expected-queries 1",
       ]
+      profile = f"raw ({dataset})"
     else:
-      env.update({"OBJECTS": "100", "QUERIES": "2", "EXPECTED_MESSAGES": "200", "DATASET": "synthetic"})
-      profile = "default"
+      objects = 100
+      queries = 2
+      max_events = objects * queries
+      expected = max_events * topics if dataset == "all" else max_events
+      env.update({"OBJECTS": str(objects), "QUERIES": str(queries), "EXPECTED_MESSAGES": str(expected), "DATASET": dataset})
+      profile = f"default ({dataset})"
       command = ["just", "test-all"]
     log = TEST_LOG.open("w")
     TEST_PROCESS = subprocess.Popen(
@@ -456,7 +465,21 @@ INDEX = r"""<!doctype html>
       <div class="card wide"><div class="label">Topic Traffic</div><pre id="topics">Waiting for traffic...</pre></div>
       <div class="card wide"><div class="label">Throughput</div><canvas id="chart"></canvas></div>
       <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Spark log: <code>reports/e2e/spark.log</code></div></div>
-      <div class="card wide"><div class="label">CLI Test Runner</div><div class="actions"><button class="primary" id="runDefault">Run Full CLI Tests</button><button id="runRaw">Run Raw Topics E2E</button><span class="sub" id="testState">idle</span></div><pre id="testLog">No test run started.</pre></div>
+      <div class="card wide"><div class="label">CLI Test Runner</div>
+        <div class="actions">
+          <select id="datasetSelector" style="height:36px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; padding:0 8px;">
+            <option value="synthetic">Synthetic</option>
+            <option value="intel">Intel Lab (Real)</option>
+            <option value="pump">Water Pump (Real)</option>
+            <option value="gas">Gas Sensors (Real)</option>
+            <option value="all">Real (Multitopic: Intel/Pump/Gas)</option>
+          </select>
+          <button class="primary" id="runDefault">Run Full CLI Tests</button>
+          <button id="runRaw">Run Raw Topics E2E</button>
+          <span class="sub" id="testState">idle</span>
+        </div>
+        <pre id="testLog">No test run started.</pre>
+      </div>
     </section>
   </main>
 <script>
@@ -511,7 +534,12 @@ async function tick() {
     (m.issues.length ? m.issues : ["No current issues detected"]).forEach(issue => {
       const li = document.createElement("li"); li.textContent = issue; issues.appendChild(li);
     });
-    history.push({mqtt: m.mqtt.published || 0, kafka: m.kafka.messages || 0, spark: m.spark.topKResults || 0});
+    const curRaw = {mqtt: m.mqtt.published || 0, kafka: m.kafka.messages || 0, spark: m.spark.topKResults || 0};
+    const prevRaw = history.length > 0 ? history[history.length - 1].raw : curRaw;
+    const dMqtt = Math.max(0, curRaw.mqtt - prevRaw.mqtt);
+    const dKafka = Math.max(0, curRaw.kafka - prevRaw.kafka);
+    const dSpark = Math.max(0, curRaw.spark - prevRaw.spark);
+    history.push({raw: curRaw, mqtt: dMqtt, kafka: dKafka, spark: dSpark});
     while (history.length > 80) history.shift();
     draw();
   } catch (e) {
@@ -530,7 +558,8 @@ async function pollTests() {
   $("runRaw").disabled = running;
 }
 async function runTests(profile) {
-  await fetch("/api/tests/run", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({profile})});
+  const dataset = $("datasetSelector").value;
+  await fetch("/api/tests/run", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({profile, dataset})});
   pollTests();
 }
 $("runDefault").onclick = () => runTests("default");
@@ -574,7 +603,7 @@ class Handler(BaseHTTPRequestHandler):
     if self.path == "/api/tests/run":
       length = int(self.headers.get("content-length", "0"))
       request = json.loads(self.rfile.read(length) or b"{}")
-      started, state = start_test(request.get("profile", "default"))
+      started, state = start_test(request.get("profile", "default"), request.get("dataset", "synthetic"))
       payload = json.dumps(state).encode()
       self.send_response(202 if started else 409)
       self.send_header("content-type", "application/json")

@@ -26,12 +26,12 @@ Config:
 
 Timing:
 
-- mqttPublishMs: 2586
-- mqttToKafkaReadyMs: 3894
-- sparkDrainMs: 17077
-- totalE2EMs: 20973
-- publishRateMessagesPerSecond: 154.68
-- endToEndRateMessagesPerSecond: 19.07
+- mqttPublishMs: 2823
+- mqttToKafkaReadyMs: 4343
+- sparkDrainMs: 28460
+- totalE2EMs: 32804
+- publishRateMessagesPerSecond: 141.69
+- endToEndRateMessagesPerSecond: 12.19
 
 Artifacts:
 

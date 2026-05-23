@@ -1,0 +1,26 @@
+engine=apache-spark source=simulator dataset=synthetic k=10 partitions=4 elapsedMs=6346
+rawEvents=400 probabilisticInstances=1286 synopsisRules=8 synopsisBins=8
+TopKResult{engine=apache-spark, queryId=q0, objects=200, refined=10, pruned=190, pruneRatio=0.9500, tau=61.080153, compactShuffleRecords=200}
+query=q0 objects=200 refined=10 pruned=190 pruneRatio=0.9500 tau=61.080153 compactShuffleRecords=200
+  rank object=obj-35 score=110.231457 lb=109.231457 ub=111.231457 instances=1
+  rank object=obj-171 score=88.113067 lb=87.613067 ub=88.613067 instances=2
+  rank object=obj-158 score=79.916935 lb=78.916935 ub=80.916935 instances=1
+  rank object=obj-51 score=77.971138 lb=76.971138 ub=78.971138 instances=1
+  rank object=obj-187 score=72.196272 lb=71.696272 ub=72.696272 instances=2
+  rank object=obj-58 score=69.303447 lb=68.732018 ub=69.874876 instances=2
+  rank object=obj-5 score=66.614453 lb=66.043025 ub=67.185882 instances=2
+  rank object=obj-136 score=65.844525 lb=64.844525 ub=66.844525 instances=1
+  rank object=obj-122 score=65.284233 lb=64.712804 ub=65.855661 instances=2
+  rank object=obj-177 score=62.080153 lb=61.080153 ub=63.080153 instances=1
+TopKResult{engine=apache-spark, queryId=q1, objects=200, refined=10, pruned=190, pruneRatio=0.9500, tau=50.517169, compactShuffleRecords=200}
+query=q1 objects=200 refined=10 pruned=190 pruneRatio=0.9500 tau=50.517169 compactShuffleRecords=200
+  rank object=obj-127 score=90.053333 lb=89.520000 ub=90.586667 instances=2
+  rank object=obj-27 score=79.593339 lb=79.093339 ub=80.093339 instances=2
+  rank object=obj-161 score=64.145815 lb=63.145815 ub=65.145815 instances=1
+  rank object=obj-45 score=59.351077 lb=59.084411 ub=59.617744 instances=4
+  rank object=obj-123 score=58.533753 lb=57.533753 ub=59.533753 instances=1
+  rank object=obj-70 score=56.778256 lb=56.526376 ub=57.030136 instances=4
+  rank object=obj-10 score=55.616710 lb=55.116710 ub=56.116710 instances=2
+  rank object=obj-2 score=52.948470 lb=52.448470 ub=53.448470 instances=2
+  rank object=obj-56 score=51.112326 lb=50.612326 ub=51.612326 instances=2
+  rank object=obj-170 score=51.046581 lb=50.517169 ub=51.575992 instances=2
