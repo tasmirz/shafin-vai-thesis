@@ -1,8 +1,8 @@
-# Paper-Grounded Probabilistic Top-k Stream Task
+# Paper-Informed EMQX-Kafka-Flink Top-k Stream Task
 
 This project implements a compact Apache Flink DataStream prototype for probabilistic top-k ranking over imperfect stream data. The containerized runtime uses the official `apache/flink:2.2.0-scala_2.12` Docker image.
 
-The implementation follows the thesis/paper interpretation in the prompt:
+The implementation adapts selected incomplete-data/top-k concepts into a replacement streaming architecture:
 
 - incomplete raw records are repaired into probabilistic instances;
 - ranking uses query-relative dynamic dominance;
@@ -29,9 +29,9 @@ just test-all
 
 The recipes wrap the Maven, Docker Compose, curl, monitor, validation, benchmark, and Kubernetes commands used by the project.
 
-## Paper Alignment
+## Architecture Position
 
-The current code is a Flink-based streaming prototype inspired by the supplied PTD and Topk-iDS papers. It validates dynamic dominance, probabilistic instance scoring, candidate pruning/refinement, and an end-to-end MQTT/Kafka/Flink ingestion path. It is not a full reproduction of the target paper's MapReduce/aR-tree distributed PTD algorithm.
+The current code replaces the papers' offline/Spark-oriented execution setting with an EMQX MQTT -> Kafka -> Flink event-streaming implementation. It adopts incomplete-record processing, probabilistic repair, dynamic-dominance ranking, and candidate refinement concepts, then validates them through this architecture. California road data, MapReduce/aR-tree execution, and Spark are not implementation requirements for the proposed system.
 
 The detailed validation report is written to:
 
@@ -45,7 +45,7 @@ The current EMQX/Kafka/Flink implementation report is written to:
 reports/implementation/emqx-kafka-flink-implementation-report.md
 ```
 
-The algorithm benchmark reports prototype metrics shaped for later paper comparison:
+The algorithm benchmark reports metrics of the implemented Flink-oriented analytics path:
 
 - exact baseline runtime;
 - certified pruning runtime and exact top-k agreement;
@@ -54,7 +54,7 @@ The algorithm benchmark reports prototype metrics shaped for later paper compari
 - candidate communication-reduction proxy;
 - partitioned candidate refinement and calculated shuffle-write proxy bytes.
 
-These metrics are not paper-matching numerical results yet: Spark is not executing the benchmark, shuffle write is not measured from Spark metrics, and Topk-iDS F-score against retained complete-data ground truth is not implemented. See the validation report for the comparability decision.
+These metrics are reported for this architecture: Spark is not executing the benchmark and shuffle proxy values are not presented as Spark metrics. Ground-truth F-score over intentionally masked Intel/Pump/Gas inputs remains an accuracy-evaluation extension.
 
 ## Run Tests
 
@@ -182,7 +182,10 @@ just k8s-logs
 The Kubernetes flow is:
 
 ```text
-incomplete-data-publisher -> MQTT topic thesis/raw -> EMQX Kafka sink -> Kafka topic thesis.raw.incomplete -> Apache Flink session cluster
+Python simulator -> thesis/raw/intel, thesis/raw/pump, thesis/raw/gas
+  -> EMQX Kafka actions
+  -> thesis.raw.intel, thesis.raw.pump, thesis.raw.gas
+  -> Apache Flink application cluster
 ```
 
 ## Full E2E Benchmark

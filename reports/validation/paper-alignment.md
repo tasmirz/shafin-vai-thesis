@@ -1,44 +1,93 @@
-# Paper Alignment Validation
+# Paper-Informed Architecture Validation
 
-This report validates the current implementation against the supplied papers:
+This report validates the implemented EMQX, Kafka, and Apache Flink architecture against the research motivation and selected query concepts in the supplied papers:
 
 - `papers/s10115-023-01917-3(Target Paper).pdf`: Distributed probabilistic top-k dominating queries over uncertain databases.
 - `papers/10295282.pdf`: Effective and efficient top-k query processing over incomplete data streams.
 - `papers/Pre-defense.pdf`: Spark framework proposal combining incomplete-stream imputation and distributed PTD pruning.
 
-## What Matches
+## Positioning
 
-| Paper requirement | Current implementation | Status |
+This project is **not** a reproduction of the papers' infrastructure or datasets. It proposes a replacement streaming architecture:
+
+```text
+Python data simulator/preprocessor
+  -> EMQX MQTT ingress and Kafka actions
+  -> Apache Kafka topic isolation
+  -> Apache Flink event-time processing
+  -> probabilistic top-k result monitoring
+```
+
+The papers motivate the incomplete-stream problem, probabilistic repair, and top-k/dominance evaluation. The implemented contribution is to execute an adapted processing path as an observable realtime event pipeline using EMQX, Kafka, Flink, Docker Compose, and Kubernetes.
+
+Accordingly:
+
+- California road-network input is not required for this implementation.
+- Spark 3.0 and MapReduce execution are not target runtime requirements.
+- aR-tree exchange and Spark shuffle metrics are not missing architecture components; they belong to approaches that this system replaces.
+- Paper metrics are used as conceptual references only where the implemented metric has equivalent meaning.
+
+## Adopted Research Concepts
+
+| Research concept | Current implementation | Validation status |
 | --- | --- | --- |
-| Incomplete stream records with missing attributes | `RawEvent`, Python simulator publisher, EMQX ingress, Kafka topic | Implemented |
-| Imputation into probabilistic instances | `ImputationEngine` emits mutually exclusive `ProbabilisticInstance` records with normalized probabilities | Implemented as simplified DD-style rules |
-| Dynamic dominance relative to query point | `DominanceScorer.dynamicallyDominates` implements absolute-distance dominance exactly as the target paper defines it | Implemented |
-| PTD object score | `expectedDominanceScore` computes instance probability times dominated probability mass, then sums per object | Implemented for in-memory/global set |
-| Top-k agreement against exact ranking | Benchmark validates certified pruned top-k equals this implementation's exact PTD-style ranking | Implemented as internal consistency, not paper accuracy |
-| Runtime benchmark | `TopKBenchmark` reports exact, certified-pruned, and fast-candidate runtimes | Implemented |
-| Communication/pruning proxy | `candidateCommunicationReduction` estimates reduction from sending/refining only candidate objects | Implemented |
-| Precision@k | `fastPrecisionAtK` compares fast candidate pruning against the same implementation's exact ranking | Implemented as pruning fidelity, not ground-truth F-score |
-| Dataset plug-in point | `DatasetProvider` supports `synthetic`, `csv`, `intel`, `pump`, `gas`, and combined `all` providers selected by CLI | Implemented |
-| Dataset-specific ingress topics | Decoupled Python sender preprocesses Intel/Pump/Gas raw archives and publishes them to separate MQTT/Kafka topic pairs | Implemented |
-| 4-node partition benchmark | `TopKBenchmark` partitions objects, emits partition-local candidates, and reports partitioned precision and shuffle-write proxy bytes | Implemented as benchmark model |
-| E2E streaming path | MQTT -> EMQX Kafka sink -> Kafka -> Flink 2.2.0 session cluster | Implemented and validated operationally; outside the papers' measured runtimes |
+| Incomplete stream records | Python simulator publishes normalized `RawEvent` JSON with `null` attributes and `missingMask` | Implemented and E2E validated |
+| Real incomplete-data families | Sender preprocesses Intel, Pump, and Gas archives separately | Implemented and routed separately |
+| Probabilistic representation after repair | `ImputationEngine` emits mutually exclusive `ProbabilisticInstance` alternatives with normalized probabilities | Implemented using simplified rules |
+| Query-relative dynamic dominance | `DominanceScorer.dynamicallyDominates` evaluates distance from configured query points | Implemented |
+| Expected dominance ranking | `expectedDominanceScore` sums probability-weighted dominated mass per object | Implemented |
+| Candidate pruning and exact refinement | `ProbabilisticTopK` supports certified and fast candidate paths against its exact ranking baseline | Implemented and internally checked |
+| Continuous/stream processing objective | Flink consumes Kafka streams and emits event-time-window top-k results | Implemented |
 
-## Paper Evaluation Requirements
+## Intentional Architectural Replacements
 
-| Source | Paper evaluation basis | Required before numerical comparison |
+| Source-paper approach | Implemented replacement | Reason and validation target |
 | --- | --- | --- |
-| Rai and Lian, distributed PTD | California road network with 98,451 MBRs and Uniform/Gaussian/Zipf synthetic uncertain objects; objects randomly distributed over `N` servers; 20 random query points; wall-clock time and inter-server communication cost; `N` in `{1,2,5,8,10}`, `k` in `{5,10,15,20,25}`, and `|D|` from `100K` to `1M` | Implement aR-tree summaries, score-bound pruning, MapReduce filtering/refinement, and measured communication over paper-scale inputs |
-| Ren, Lian, and Ghazinour, Topk-iDS | Intel (`2.3M` records, four extracted attributes), Pump (`220K`, ten attributes), Gas (`919,438`, ten attributes); known complete records made incomplete by removing `m` attributes; DD imputation plus PT-k over count-based sliding windows; report wall-clock time and F-score against original complete-data top-k | Implement the paper DD rules, count-window PT-k semantics, retained complete ground truth, F-score, and paper parameter sweeps |
-| Pre-defense proposal | Apache Spark 3.0 on a four-node cluster with 16 GB RAM per node; Intel and synthetic input; Naive-Centralized versus Distributed-PTD; runtime, measured Shuffle Write MB, and Precision@k | Execute on Spark rather than label a local Java/Flink calculation as Spark; collect Spark metrics and run its baselines |
+| Offline/distributed database or MapReduce ingestion | EMQX MQTT ingress with Kafka producer actions | Accept live event feeds and validate ingress completeness and bridge failures |
+| Spark/MapReduce runtime | Apache Flink `2.2.0` DataStream processing | Execute stateful event-time streaming and validate job completion/output |
+| Paper-specific server communication or shuffle reporting | Kafka topic offsets, EMQX action metrics, E2E timing, and calculated candidate proxy | Measure the proposed architecture honestly without presenting proxies as Spark communication metrics |
+| California road-network experimental source | Intel, Pump, Gas, synthetic, and extensible CSV provider interface | Focus on sensor-stream incomplete data available to this project |
+| Single benchmark input flow | Dataset-specific MQTT/Kafka topic isolation | Observe and process each source family independently |
+
+## Implemented Architecture
+
+### Ingress And Routing
+
+For raw dataset execution, the simulator preprocesses each dataset and publishes independently:
+
+| Dataset | MQTT topic | Kafka topic |
+| --- | --- | --- |
+| Intel | `thesis/raw/intel` | `thesis.raw.intel` |
+| Pump | `thesis/raw/pump` | `thesis.raw.pump` |
+| Gas | `thesis/raw/gas` | `thesis.raw.gas` |
+
+EMQX is configured either through scripted REST API calls for Docker Compose tests or through the Kubernetes configuration manifest. Its Kafka actions forward MQTT payloads without altering the normalized event schema.
+
+### Flink Processing
+
+The Flink application performs:
+
+```text
+KafkaSource
+  -> RawEvent deserialization
+  -> event-time watermark assignment
+  -> probabilistic imputation
+  -> query-family keyed state
+  -> time-window top-k ranking
+  -> TopKResult output
+```
+
+The current ranking semantic is PTD-style expected dynamic dominance. It is a deliberate implemented semantic for this architecture. PT-k possible-world probability can be considered as an additional operator in future work, but its absence does not make the EMQX/Kafka/Flink architecture invalid.
 
 ## Validated Results
 
-### Synthetic Algorithm Check
+### Synthetic Algorithm Behavior Check
 
-A repeatable synthetic algorithm check generated `reports/algorithm/topk-100x2.txt` using:
+A repeatable algorithm test generated `reports/algorithm/topk-100x2.txt`:
 
 ```text
 dataset=synthetic objects=100 events=200 dimensions=4 queries=2 k=10 missingRate=0.350 partitions=4
+executionEngine=java-local partitionModelNodes=4 shuffleMetric=calculated-candidate-proxy
 avgExactMs=7.801
 avgCertifiedPrunedMs=14.814
 avgFastCandidateMs=2.512
@@ -51,14 +100,13 @@ avgPartitionedPrecisionAtK=1.000
 
 Interpretation:
 
-- `topKAgreement=true` and `avgFastPrecisionAtK=1.000` show agreement against this implementation's exact baseline on two small synthetic queries.
-- `avgCandidateCommunicationReduction=0.600` is comparable in direction to a paper pruning/communication objective, but is not measured network traffic.
-- `avgPartitionedShuffleWriteProxyBytes=5120` is computed as `candidateCount * 128` in the Java benchmark; it is not Spark Shuffle Write MB.
-- This run has 100 objects rather than the target paper's `100K` to `1M` objects, and it does not run the papers' baselines.
+- `avgFastPrecisionAtK=1.000` is agreement with this implementation's exact expected-dominance baseline on the tested synthetic workload.
+- `avgCandidateCommunicationReduction=0.600` and `avgPartitionedShuffleWriteProxyBytes=5120` are candidate-processing indicators, not measured Spark shuffle/network quantities.
+- The check validates internal ranking and pruning behavior for the Flink-oriented implementation.
 
-### Raw Dataset Routing And Processing Check
+### EMQX-Kafka-Flink Raw Dataset E2E Check
 
-The GUI-triggered `raw` E2E test generated the current `reports/e2e/summary.md`:
+The GUI-triggered raw pipeline validation produced:
 
 ```text
 dataset: all (intel, pump, gas)
@@ -71,62 +119,49 @@ e2e_rate_msg_s: 2.70
 status: passed
 ```
 
-The companion algorithm check, `DATASET=all OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 just bench`, produced:
+Observed bridge and processing status:
 
-```text
-dataset provider=all objects=5 events=15 instances=20
-intel candidates=1 topKAgreement=true
-pump-normal candidates=5 topKAgreement=true
-gas candidates=1 topKAgreement=true
-avgFastPrecisionAtK=1.000
-```
+| Measure | Result |
+| --- | ---: |
+| EMQX Kafka actions matched/succeeded | `15 / 15` |
+| EMQX Kafka action failures/drops | `0 / 0` |
+| Kafka records received | `15 / 15` |
+| Flink outputs emitted | `15 / 15` |
+| Flink failed jobs | `0` |
+| Ingestion completeness | `1.0` |
+| Processing completeness | `1.0` |
 
-This validates ingestion, preprocessing, topic separation, and execution through Flink. It does **not** validate the Topk-iDS accuracy figures. The current five-row Intel and Gas samples each collapse to one object key, so perfect ranking agreement in those families is trivial and cannot be compared with the paper's Intel/Pump/Gas F-score results.
+This validates the replacement architecture path: simulator preprocessing, per-dataset MQTT ingress, EMQX-to-Kafka forwarding, Kafka visibility, and Flink output generation.
 
-## Comparability Decision
+## Validation Boundaries
 
-| Result currently reported | Closest paper measure | Verdict |
+| Area | Valid claim | Claim not made |
 | --- | --- | --- |
-| Dynamic-dominance/PTD-style score and internal exact agreement | Distributed PTD score semantics in Rai and Lian | Partially aligned at score intent; not a reproduction because aR-tree/MapReduce phases are absent |
-| `avgFastPrecisionAtK=1.000` on synthetic input | Topk-iDS F-score; pre-defense Precision@k | Not numerically comparable: it measures pruning agreement with an internal baseline, not accuracy against complete-data ground truth |
-| `avgCandidateCommunicationReduction=0.600` | Communication-cost reduction | Directional proxy only; no byte transfer was measured between distributed algorithm stages |
-| `avgPartitionedShuffleWriteProxyBytes=5120` | Spark Shuffle Write MB | Not validated against the pre-defense result; calculated proxy, with no Spark executor metrics |
-| `2.70 msg/s` E2E for raw routes | No MQTT/Kafka/Flink measure in supplied papers | Valid operational systems result only |
-| Raw Intel/Pump/Gas topic processing | Topk-iDS real datasets | Input-family alignment achieved; algorithm and evaluation protocol are not yet matched |
+| Architecture | EMQX/Kafka/Flink pipeline executes raw incomplete events end to end | It reproduces the papers' MapReduce or Spark runtime |
+| Datasets | Intel, Pump, and Gas are accepted and isolated through ingress topics | California-road experiments are reproduced |
+| Ranking | Current PTD-style ranking is internally consistent against its exact baseline on tested data | Current score is identical to Topk-iDS PT-k/F-score semantics |
+| Communication | Kafka/EMQX traffic and calculated candidate proxies are observable | Proxy bytes equal Spark Shuffle Write or paper communication cost |
+| Accuracy | Pipeline completeness and internal pruning fidelity are measured | Paper-style ground-truth F-score has been measured |
 
-## Important Gaps
+## Remaining Work For This Architecture
 
-The implementation is a working prototype, not a full reproduction of either paper.
+The remaining tasks below improve the proposed Flink architecture rather than reproduce an excluded implementation:
 
-| Gap | Paper expectation | Current state |
-| --- | --- | --- |
-| Distributed PTD MapReduce phases | Offline partitioning, aR-tree index sharing, filtering mapper, filtering reducer, refinement mapper | Not fully implemented; Flink pipeline is distributed operationally, but algorithm is not the paper's MapReduce/aR-tree design |
-| aR-tree score bounds | Lower/upper bounds from dynamic dominance regions and MBR containment/intersection | Not implemented; certified path uses exact-derived bounds, fast path uses candidate proxy |
-| Cost model for index level selection | Estimate communication cost and pruning power for index sharing | Not implemented |
-| Real datasets and ground truth | Target paper uses California roads; Topk-iDS uses complete Intel/Pump/Gas records then removes values to evaluate F-score | Intel/Pump/Gas archive preprocessors are implemented; current short raw smoke samples and generic rules cannot produce comparable F-score |
-| Topk-iDS PT-k semantics | Probability that an imputed object appears in top-k possible worlds over sliding window | Not implemented; current Flink job emits PTD-style dominance scores over event-time windows |
-| Spark requirement from pre-defense | Spark 3.0, shuffle write, 4-node cluster | Benchmark explicitly identifies its Java-local four-partition model and calculated shuffle proxy; runtime implementation remains Flink 2.2.0 with Kafka, EMQX, Docker Compose, and Kubernetes manifests |
+| Improvement | Reason |
+| --- | --- |
+| Preserve complete Intel/Pump/Gas records before simulated missingness and compute Precision/Recall/F-score | Add external accuracy evidence for the chosen ranking/imputation design |
+| Implement dataset-specific imputation rules or configurable rule loading | Replace generic repair assumptions with dataset-informed behavior |
+| Make Flink parallelism configurable and run parallel Kubernetes E2E measurements | Validate scaling of the selected Flink execution model |
+| Measure Kafka/EMQX throughput over larger raw workloads and failure cases | Validate ingress robustness and realistic throughput |
+| Investigate broker-level `messages.dropped` while Kafka action success remains complete | Clarify the operational reliability metric presented in the GUI |
+| Optionally add PT-k operator mode | Enable a direct semantic comparison with Topk-iDS if required for analysis, without replacing the architecture |
 
 ## Validation Decision
 
-The results validate a streaming prototype and ingestion platform inspired by the papers. They do **not** currently match or reproduce any numerical benchmark in the supplied papers. A paper-matching result requires the missing algorithm semantics, ground-truth accuracy protocol, paper-scale workloads, and measured Spark/distributed communication data.
+The current result supports the following thesis statement:
 
-Use this wording:
+> This work replaces prior offline/Spark-oriented execution assumptions with an event-driven incomplete-data processing architecture built on EMQX MQTT ingress, Apache Kafka topic routing, and Apache Flink event-time analytics. The prototype validates per-dataset ingestion for Intel, Pump, and Gas streams, probabilistic repair and PTD-style top-k processing, realtime observability, and end-to-end execution completeness. Paper-derived concepts guide the analytics design; excluded paper infrastructure and datasets are not presented as replication requirements.
 
-> The system implements a Flink-based streaming prototype inspired by distributed PTD and Topk-iDS. It validates dynamic dominance, probabilistic instance scoring, pruning/candidate refinement, dataset-provider plug-ins, and an end-to-end MQTT/Kafka/Flink ingestion path. Current benchmark output reports internal ranking agreement and calculated candidate/shuffle proxies; it is not a numerical reproduction of the papers' Spark, MapReduce, or PT-k experiments.
+The following statement should not be used:
 
-Avoid this wording:
-
-> This fully implements the MapReduce/aR-tree distributed PTD algorithm from Rai and Lian or fully reproduces the Topk-iDS benchmark suite.
-
-## Next Work To Fully Match The Papers
-
-1. Implement aR-tree/MBR summaries per partition.
-2. Compute score lower/upper bounds using dynamic dominance regions.
-3. Add filtering-mapper, filtering-reducer, and refinement-mapper stages as separate Flink/Spark-like operators.
-4. Add California road-network input if matching the distributed PTD target paper is required.
-5. Preserve complete Intel/Pump/Gas ground truth, inject missing attributes exactly as Topk-iDS specifies, and compute F-score.
-6. Implement the Topk-iDS DD rules, PT-k threshold, and count-based sliding-window parameter sweeps.
-7. Add parameter sweeps for `N`, `k`, dimensionality, object count, missing attributes, and instances per object.
-8. Replace shuffle-write proxy bytes with measured Spark 3.0 shuffle write if matching the pre-defense benchmark is required.
-9. Report paper-table metrics: wall-clock time, measured communication/shuffle MB, pruning power, and ground-truth Precision/Recall/F-score.
+> This system reproduces the original papers' MapReduce, Spark, aR-tree, California-road, PT-k, or numerical benchmark experiments.

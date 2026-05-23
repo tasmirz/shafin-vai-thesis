@@ -1,6 +1,6 @@
 # EMQX-Kafka-Flink Incomplete Stream Processing Implementation Report
 
-**Project:** Paper-Grounded Probabilistic Top-k Stream Task  
+**Project:** Paper-Informed EMQX-Kafka-Flink Top-k Stream Task  
 **Report date:** 2026-05-23  
 **Implementation status:** Executable prototype with Docker Compose E2E verification and Kubernetes manifests  
 
@@ -32,7 +32,7 @@ The latest validated raw-route execution processed 15 records end to end:
 | Total E2E time | 5,563 ms |
 | E2E throughput | 2.70 messages/s |
 
-This result validates the implemented systems path. It does not constitute numerical reproduction of the supplied research papers' Spark, MapReduce/aR-tree, or PT-k accuracy experiments.
+This result validates the proposed replacement architecture. The papers supply the incomplete-data and top-k motivation; this implementation evaluates an EMQX/Kafka/Flink execution design rather than recreating their Spark or MapReduce deployments.
 
 ## 1. System Purpose And Scope
 
@@ -482,7 +482,7 @@ A separate synthetic algorithm run currently records:
 | Candidate communication-reduction proxy | 0.600 |
 | Four-partition shuffle proxy | 5,120 bytes |
 
-The benchmark is identified in its output as `executionEngine=java-local`, `partitionModelNodes=4`, and `shuffleMetric=calculated-candidate-proxy`. It is included as internal algorithm behavior evidence rather than as distributed Spark measurement.
+The benchmark is identified in its output as `executionEngine=java-local`, `partitionModelNodes=4`, and `shuffleMetric=calculated-candidate-proxy`. It is included as evidence for the implemented analytics path, not as a Spark metric.
 
 ## 11. Strengths Of The Current Implementation
 
@@ -492,7 +492,7 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 4. **Scripted reproducibility.** Service setup, EMQX API creation, benchmarking, and validation are executable from CLI recipes.
 5. **Deterministic E2E testing.** Bounded Kafka consumption provides finite test completion and message-count validation.
 6. **Portable deployment definition.** Docker Compose handles local verification and Kubernetes manifests describe cluster deployment.
-7. **Transparent metric labeling.** Algorithm proxy metrics are explicitly separated from measured distributed/Spark results.
+7. **Transparent metric labeling.** Algorithm proxy metrics are explicitly separated from measured EMQX/Kafka/Flink traffic and completion measures.
 
 ## 12. Limitations And Risks
 
@@ -504,10 +504,10 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 | EMQX topology | Single EMQX instance | No MQTT ingress high availability evidence |
 | Kubernetes verification | Manifests exist but current recorded E2E result is Compose-based | No Kubernetes throughput or recovery result is currently claimed |
 | Broker metric interpretation | Global EMQX `messages.dropped` is nonzero while Kafka actions succeed | Dashboard users must distinguish MQTT delivery behavior from bridge forwarding health |
-| Imputation model | Simplified generated imputation rules | Not equivalent to dataset-specific DD imputation from the papers |
-| Top-k semantics | PTD-style dominance score, not Topk-iDS PT-k semantics | Not comparable to paper F-score claims |
-| Accuracy evaluation | No complete-data ground-truth injection/retention protocol | No paper-grade precision/recall/F-score result |
-| Performance scale | Small smoke and prototype benchmark sizes | Does not establish paper-scale scalability |
+| Imputation model | Simplified generated imputation rules | External accuracy evidence requires configurable or dataset-specific rules |
+| Top-k semantics | Implemented mode is PTD-style expected dynamic dominance | PT-k would be a separate optional comparison mode, not a runtime requirement |
+| Accuracy evaluation | No complete-data ground-truth injection/retention protocol | No independent precision/recall/F-score result yet |
+| Performance scale | Small smoke and prototype benchmark sizes | Does not establish production-scale throughput or scaling |
 
 ## 13. Recommended Next Implementation Steps
 
@@ -519,13 +519,12 @@ The benchmark is identified in its output as `executionEngine=java-local`, `part
 4. Add Kubernetes E2E execution and reporting rather than manifest-only validation.
 5. Add failure tests for broker restart, TaskManager loss, and malformed payload handling.
 
-### Research Validation
+### Analytics Validation Extensions
 
 1. Retain complete Intel/Pump/Gas source records and inject missing fields under a controlled protocol.
 2. Implement dataset-specific DD rules and ground-truth Precision/Recall/F-score calculation.
-3. Implement PT-k count-window evaluation if reproducing Topk-iDS results is required.
-4. Implement aR-tree/MapReduce-style summaries and measured communication cost if reproducing distributed PTD is required.
-5. Use actual Spark 3.0 execution and Spark metrics if validating pre-defense shuffle-write results is required.
+3. Optionally implement PT-k count-window evaluation as a second algorithm mode for comparison.
+4. Measure the selected architecture using EMQX action latency/error counts, Kafka ingress throughput, and Flink processing latency at larger scales.
 
 ## 14. Reproduction Commands
 
@@ -608,4 +607,4 @@ just k8s-apply
 
 The current EMQX-Kafka-Flink implementation is a functioning and testable stream-processing prototype. It successfully preprocesses multiple incomplete-data sources, routes dataset-specific MQTT traffic into Kafka through EMQX, executes Flink imputation and top-k processing, and exposes reproducible validation and monitoring interfaces. The verified E2E result demonstrates complete passage of the current raw sample workload through the implemented path with no Kafka-action or Flink processing failures.
 
-The system is suitable as the present implementation chapter foundation and as an experimental platform for subsequent thesis work. Claims should remain limited to the verified prototype and operational E2E results until the paper-specific algorithms, ground-truth accuracy protocol, large-scale workloads, and measured distributed metrics are implemented.
+The system is suitable as the present implementation chapter foundation and as an experimental platform for subsequent thesis work. Its claim is an observable EMQX/Kafka/Flink replacement architecture for incomplete-data top-k processing. Future results should expand ground-truth accuracy and scaled runtime measurement within this selected architecture.
