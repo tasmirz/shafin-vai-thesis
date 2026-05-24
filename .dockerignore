@@ -1,0 +1,6 @@
+.git
+.idea
+.vscode
+target/*
+!target/probabilistic-topk-spark-1.0.0-SNAPSHOT-shaded.jar
+.venv

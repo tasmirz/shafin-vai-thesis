@@ -39,7 +39,7 @@ public final class DdImputationSynopsis implements Serializable {
   public List<ValueCandidate> candidates(RawEvent event, int dimension) {
     Map<Integer, ConditionalRule> rules = rulesByQuery.get(event.queryId());
     if (rules == null || !rules.containsKey(dimension)) {
-      return List.of();
+      return new ArrayList<>();
     }
     return rules.get(dimension).candidates(event);
   }
@@ -99,7 +99,7 @@ public final class DdImputationSynopsis implements Serializable {
         continue;
       }
       List<ValueCandidate> fallback = summarize(targetValues);
-      ConditionalRule best = new ConditionalRule(target, -1, 0.0, 1.0, List.of(), fallback,
+      ConditionalRule best = new ConditionalRule(target, -1, 0.0, 1.0, new ArrayList<>(), fallback,
           targetValues.size());
       for (int determinant = 0; determinant < dimensions; determinant++) {
         if (determinant == target) {
@@ -116,7 +116,7 @@ public final class DdImputationSynopsis implements Serializable {
       }
       rules.put(target, best);
     }
-    return Map.copyOf(rules);
+    return rules;
   }
 
   private static ConditionalRule fromPairs(
@@ -146,7 +146,7 @@ public final class DdImputationSynopsis implements Serializable {
         ? fallback.size()
         : (double) support.size() / occupied;
     return new ConditionalRule(
-        target, determinant, min, max, List.copyOf(summaries), fallback, estimatedCandidates);
+        target, determinant, min, max, summaries, fallback, estimatedCandidates);
   }
 
   private static List<Double> observedValues(List<RawEvent> events, int dimension) {
@@ -176,22 +176,26 @@ public final class DdImputationSynopsis implements Serializable {
   }
 
   private static List<ValueCandidate> summarize(List<Double> source) {
+    List<ValueCandidate> result = new ArrayList<>();
     if (source.isEmpty()) {
-      return List.of();
+      return result;
     }
-    List<Double> values = source.stream().sorted(Comparator.naturalOrder()).toList();
+    List<Double> values = new ArrayList<>(source);
+    values.sort(Comparator.naturalOrder());
     if (values.size() == 1) {
-      return List.of(new ValueCandidate(values.get(0), 1.0));
+      result.add(new ValueCandidate(values.get(0), 1.0));
+      return result;
     }
     int midpoint = Math.max(1, values.size() / 2);
     List<Double> low = values.subList(0, midpoint);
     List<Double> high = values.subList(midpoint, values.size());
     if (high.isEmpty()) {
-      return List.of(new ValueCandidate(mean(low), 1.0));
+      result.add(new ValueCandidate(mean(low), 1.0));
+      return result;
     }
-    return List.of(
-        new ValueCandidate(mean(low), (double) low.size() / values.size()),
-        new ValueCandidate(mean(high), (double) high.size() / values.size()));
+    result.add(new ValueCandidate(mean(low), (double) low.size() / values.size()));
+    result.add(new ValueCandidate(mean(high), (double) high.size() / values.size()));
+    return result;
   }
 
   private static double mean(List<Double> values) {
@@ -206,17 +210,58 @@ public final class DdImputationSynopsis implements Serializable {
     return Math.min(bins - 1, Math.max(0, (int) Math.floor(scaled * bins)));
   }
 
-  private record Pair(double determinant, double target) implements Serializable {
+  private static final class Pair implements Serializable {
+    private final double determinant;
+    private final double target;
+
+    Pair(double determinant, double target) {
+      this.determinant = determinant;
+      this.target = target;
+    }
+
+    double determinant() {
+      return determinant;
+    }
+
+    double target() {
+      return target;
+    }
   }
 
-  private record ConditionalRule(
-      int targetDimension,
-      int determinantDimension,
-      double determinantMin,
-      double determinantMax,
-      List<List<ValueCandidate>> buckets,
-      List<ValueCandidate> fallback,
-      double estimatedCandidateCount) implements Serializable {
+  private static final class ConditionalRule implements Serializable {
+    private final int targetDimension;
+    private final int determinantDimension;
+    private final double determinantMin;
+    private final double determinantMax;
+    private final List<List<ValueCandidate>> buckets;
+    private final List<ValueCandidate> fallback;
+    private final double estimatedCandidateCount;
+
+    ConditionalRule(
+        int targetDimension,
+        int determinantDimension,
+        double determinantMin,
+        double determinantMax,
+        List<List<ValueCandidate>> buckets,
+        List<ValueCandidate> fallback,
+        double estimatedCandidateCount) {
+      this.targetDimension = targetDimension;
+      this.determinantDimension = determinantDimension;
+      this.determinantMin = determinantMin;
+      this.determinantMax = determinantMax;
+      this.buckets = buckets;
+      this.fallback = fallback;
+      this.estimatedCandidateCount = estimatedCandidateCount;
+    }
+
+    int targetDimension() { return targetDimension; }
+    int determinantDimension() { return determinantDimension; }
+    double determinantMin() { return determinantMin; }
+    double determinantMax() { return determinantMax; }
+    List<List<ValueCandidate>> buckets() { return buckets; }
+    List<ValueCandidate> fallback() { return fallback; }
+    double estimatedCandidateCount() { return estimatedCandidateCount; }
+
     List<ValueCandidate> candidates(RawEvent event) {
       if (determinantDimension < 0 || determinantDimension >= event.attributes().length) {
         return fallback;
@@ -232,9 +277,39 @@ public final class DdImputationSynopsis implements Serializable {
     }
   }
 
-  public record ValueCandidate(double value, double probability) implements Serializable {
+  public static final class ValueCandidate implements Serializable {
+    private final double value;
+    private final double probability;
+
+    public ValueCandidate(double value, double probability) {
+      this.value = value;
+      this.probability = probability;
+    }
+
+    public double value() {
+      return value;
+    }
+
+    public double probability() {
+      return probability;
+    }
   }
 
-  public record Evaluation(int evaluatedValues, double meanAbsoluteError) implements Serializable {
+  public static final class Evaluation implements Serializable {
+    private final int evaluatedValues;
+    private final double meanAbsoluteError;
+
+    public Evaluation(int evaluatedValues, double meanAbsoluteError) {
+      this.evaluatedValues = evaluatedValues;
+      this.meanAbsoluteError = meanAbsoluteError;
+    }
+
+    public int evaluatedValues() {
+      return evaluatedValues;
+    }
+
+    public double meanAbsoluteError() {
+      return meanAbsoluteError;
+    }
   }
 }

@@ -1,7 +1,7 @@
 set dotenv-load
 
 compose_file := "docker-compose.e2e.yml"
-image := "thesis-topk:local"
+image := "thesis-topk-spark:local"
 simulator_image := "thesis-simulator:local"
 objects := env_var_or_default("OBJECTS", "200")
 queries := env_var_or_default("QUERIES", "2")
@@ -10,14 +10,12 @@ k := env_var_or_default("K", "10")
 missing_rate := env_var_or_default("MISSING_RATE", "0.35")
 rate_per_second := env_var_or_default("RATE_PER_SECOND", "200")
 qos := env_var_or_default("QOS", "0")
-window_ms := env_var_or_default("WINDOW_MS", "10000")
 expected_messages := env_var_or_default("EXPECTED_MESSAGES", "400")
 monitor_port := env_var_or_default("PORT", "8088")
 dataset := env_var_or_default("DATASET", "synthetic")
 dataset_path := env_var_or_default("DATASET_PATH", "")
 partitions := env_var_or_default("PARTITIONS", "4")
 candidate_multiplier := env_var_or_default("CANDIDATE_MULTIPLIER", "4")
-parallelism := env_var_or_default("PARALLELISM", "1")
 synopsis_bins := env_var_or_default("SYNOPSIS_BINS", "8")
 max_events := env_var_or_default("MAX_EVENTS", "0")
 
@@ -42,22 +40,42 @@ simulator-test: venv
 package:
     mvn -q -DskipTests package
 
-# build the Apache Flink based runtime image
+# build the Apache Spark runtime image
 image: package
     docker build -t {{ image }} .
+
+# alias for Spark image builds
+spark-image: image
 
 # build the decoupled Python simulator image for Kubernetes
 simulator-image:
     docker build -f docker/simulator/Dockerfile -t {{ simulator_image }} .
 
-# verify the runtime image contains Apache Flink 2.2.0
+# verify the runtime image contains Spark and the application jar
 image-check: image
-    docker run --rm --entrypoint /opt/flink/bin/flink {{ image }} --version | grep -q "Version: 2.2.0"
+    docker run --rm {{ image }} /opt/spark/bin/spark-submit --version 2>&1 | grep -qi "spark"
+    docker run --rm {{ image }} test -f /opt/spark/app/topk-spark.jar
 
 # validate docker compose and Kubernetes manifests
 config-check:
     docker compose -f {{ compose_file }} config >/dev/null
-    python3 -c 'from pathlib import Path; import yaml; docs=[doc for doc in yaml.safe_load_all(Path("k8s/pipeline.yaml").read_text()) if doc]; assert docs, "k8s/pipeline.yaml contains no resources"; print(f"k8s resources: {len(docs)}")'
+    python3 -c 'from pathlib import Path; import yaml; docs=[doc for doc in yaml.safe_load_all(Path("k8s/pipeline.yaml").read_text()) if doc]; assert docs, "k8s/pipeline.yaml contains no resources"; names=[doc.get("metadata",{}).get("name","") for doc in docs]; assert "spark-master" in names and "spark-topk-submit" in names; print(f"k8s resources: {len(docs)}")'
+
+# run the Spark upgraded job locally
+spark:
+    mkdir -p reports/spark
+    mvn -q -DskipTests package
+    docker build -t thesis-topk-spark:local . >/dev/null
+    docker run --rm \
+      -v $(pwd)/reports:/opt/spark/work-dir/reports \
+      thesis-topk-spark:local \
+      /opt/spark/bin/spark-submit \
+      --master "local[*]" \
+      --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+      /opt/spark/app/topk-spark.jar \
+      --source=simulator --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*] \
+      > reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
+    tail -n 12 reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
 
 # run the algorithm-only performance benchmark
 bench:
@@ -68,11 +86,8 @@ bench:
       > reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
     tail -n 8 reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
 
-# run the simulator-backed Flink job on the local JVM with provided Flink libraries
-run-local:
-    JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED" \
-      mvn -q -DskipTests compile exec:exec -Dexec.classpathScope=compile -Dexec.executable=java \
-      -Dexec.args="-cp %classpath com.thesis.topk.flink.ProbabilisticTopKJob --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}"
+# run the simulator-backed Spark job on the local JVM
+run-local: spark
 
 # publish generated incomplete records to a local MQTT broker
 publish-local:
@@ -82,13 +97,20 @@ publish-local:
       --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --missing-rate={{ missing_rate }} \
       --rate-per-second=20 --repeat=1
 
-# run the Kafka-backed Flink job on the local JVM with provided Flink libraries
+# run the Kafka-backed Spark job on the local JVM
 run-kafka-local:
-    JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED" \
-      mvn -q -DskipTests compile exec:exec -Dexec.classpathScope=compile -Dexec.executable=java \
-      -Dexec.args="-cp %classpath com.thesis.topk.flink.ProbabilisticTopKJob --source=kafka --kafkaBootstrap=localhost:9092 --kafkaTopic=thesis.raw.incomplete --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --windowMs={{ window_ms }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}"
+    mvn -q -DskipTests package
+    docker build -t thesis-topk-spark:local . >/dev/null
+    docker run --rm \
+      --net=host \
+      thesis-topk-spark:local \
+      /opt/spark/bin/spark-submit \
+      --master "local[*]" \
+      --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+      /opt/spark/app/topk-spark.jar \
+      --source=kafka --kafkaBootstrap=localhost:29092 --kafkaTopic=thesis.raw.incomplete --expectedMessages={{ expected_messages }} --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*]
 
-# start Kafka, EMQX, and the Flink session cluster
+# start Kafka, EMQX, and the Spark standalone cluster
 setup: image
     RESET=1 scripts/setup-services.sh
 
@@ -96,7 +118,7 @@ setup: image
 setup-fast:
     BUILD_IMAGE=0 RESET=1 scripts/setup-services.sh
 
-# run the full Dockerized E2E benchmark
+# run the full Dockerized Spark E2E benchmark
 e2e:
     OBJECTS={{ objects }} \
     QUERIES={{ queries }} \
@@ -105,11 +127,10 @@ e2e:
     MISSING_RATE={{ missing_rate }} \
     RATE_PER_SECOND={{ rate_per_second }} \
     QOS={{ qos }} \
-    WINDOW_MS={{ window_ms }} \
     DATASET={{ dataset }} \
     DATASET_PATH={{ dataset_path }} \
     MAX_EVENTS={{ max_events }} \
-    PARALLELISM={{ parallelism }} \
+    PARTITIONS={{ partitions }} \
     SYNOPSIS_BINS={{ synopsis_bins }} \
     scripts/e2e-benchmark.sh
 
@@ -122,23 +143,27 @@ e2e-fast:
     MISSING_RATE={{ missing_rate }} \
     RATE_PER_SECOND={{ rate_per_second }} \
     QOS={{ qos }} \
-    WINDOW_MS={{ window_ms }} \
     DATASET={{ dataset }} \
     DATASET_PATH={{ dataset_path }} \
     MAX_EVENTS={{ max_events }} \
-    PARALLELISM={{ parallelism }} \
+    PARTITIONS={{ partitions }} \
     SYNOPSIS_BINS={{ synopsis_bins }} \
     BUILD_IMAGE=0 \
     scripts/e2e-benchmark.sh
 
-# submit the bounded Kafka job to the Dockerized Flink session cluster
-flink-submit:
-    docker compose -f {{ compose_file }} exec -T flink-jobmanager \
-      /opt/flink/bin/flink run -m flink-jobmanager:8081 \
-      -c com.thesis.topk.flink.ProbabilisticTopKJob \
-      /opt/flink/usrlib/topk.jar \
-      --source=kafka --kafkaBounded=true --kafkaBootstrap=kafka:9092 \
-      --kafkaTopic=thesis.raw.incomplete --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --parallelism={{ parallelism }} --synopsisBins={{ synopsis_bins }}
+# submit the bounded Kafka job to the Dockerized Spark standalone cluster
+spark-submit:
+    docker compose -f {{ compose_file }} run --rm spark-submit \
+      /opt/spark/bin/spark-submit \
+      --master spark://spark-master:7077 \
+      --deploy-mode client \
+      --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+      /opt/spark/app/topk-spark.jar \
+      --source=kafka --kafkaBootstrap=kafka:9092 --kafkaTopic=thesis.raw.incomplete \
+      --expectedMessages={{ expected_messages }} --dataset={{ dataset }} --datasetPath={{ dataset_path }} \
+      --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} \
+      --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} \
+      --sparkMaster=spark://spark-master:7077
 
 # validate monitor metrics from the CLI
 monitor-check expected=expected_messages:
@@ -178,12 +203,10 @@ test-all:
     MISSING_RATE={{ missing_rate }} \
     RATE_PER_SECOND={{ rate_per_second }} \
     QOS={{ qos }} \
-    WINDOW_MS={{ window_ms }} \
     DATASET={{ dataset }} \
     DATASET_PATH={{ dataset_path }} \
     PARTITIONS={{ partitions }} \
     CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
-    PARALLELISM={{ parallelism }} \
     SYNOPSIS_BINS={{ synopsis_bins }} \
     scripts/test-all.sh
 
@@ -191,18 +214,18 @@ test-all:
 test-all-verbose:
     mkdir -p reports/tests
     set -o pipefail; OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
-      MISSING_RATE={{ missing_rate }} RATE_PER_SECOND={{ rate_per_second }} QOS={{ qos }} WINDOW_MS={{ window_ms }} \
+      MISSING_RATE={{ missing_rate }} RATE_PER_SECOND={{ rate_per_second }} QOS={{ qos }} \
       DATASET={{ dataset }} DATASET_PATH={{ dataset_path }} PARTITIONS={{ partitions }} CANDIDATE_MULTIPLIER={{ candidate_multiplier }} \
-      PARALLELISM={{ parallelism }} SYNOPSIS_BINS={{ synopsis_bins }} \
+      SYNOPSIS_BINS={{ synopsis_bins }} \
       scripts/test-all.sh 2>&1 | tee reports/tests/latest.log
 
 # show current Docker services
 ps:
     docker compose -f {{ compose_file }} ps
 
-# show Flink REST overview
-flink:
-    curl -fsS http://localhost:8081/overview | python3 -m json.tool
+# show Spark master REST/UI summary
+spark-ui:
+    curl -fsS http://localhost:8080/json/ | python3 -m json.tool
 
 # show EMQX connector/action/rule metrics
 metrics:
@@ -220,6 +243,6 @@ k8s-apply:
 k8s-pods:
     kubectl -n thesis-streaming get pods
 
-# follow Flink JobManager logs in Kubernetes
+# follow Spark submit job logs in Kubernetes
 k8s-logs:
-    kubectl -n thesis-streaming logs job/flink-jobmanager -f
+    kubectl -n thesis-streaming logs job/spark-topk-submit -f

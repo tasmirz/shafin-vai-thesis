@@ -13,8 +13,10 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
       KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    volumes:
-      - kafka-data:/bitnami/kafka
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
 
   emqx:
     image: emqx/emqx-enterprise:5.8.4
@@ -24,33 +26,65 @@ services:
       - "18884:1883"
       - "18084:18083"
 
-  flink-jobmanager:
-    image: thesis-topk:local
+  spark-master:
+    image: thesis-topk-spark:local
     depends_on:
       - kafka
-    command: jobmanager
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+
+  spark-worker:
+    image: thesis-topk-spark:local
+    depends_on:
+      - spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --webui-port
+      - "8081"
+      - --cores
+      - "2"
+      - --memory
+      - 2g
     ports:
       - "8081:8081"
     environment:
-      - |
-        FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
-        parallelism.default: 1
-        classloader.check-leaked-classloader: false
+      SPARK_NO_DAEMONIZE: "true"
 
-  flink-taskmanager:
-    image: thesis-topk:local
+  spark-submit:
+    image: thesis-topk-spark:local
     depends_on:
-      - flink-jobmanager
-    command: taskmanager
-    environment:
-      - |
-        FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
-        parallelism.default: 1
-        classloader.check-leaked-classloader: false
-
-volumes:
-  kafka-data:
+      - spark-master
+      - spark-worker
+      - kafka
+    profiles:
+      - job
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master
+      - spark://spark-master:7077
+      - --deploy-mode
+      - client
+      - --class
+      - com.thesis.topk.spark.ProbabilisticTopKSparkJob
+      - /opt/spark/app/topk-spark.jar
+      - --sparkMaster=spark://spark-master:7077
+      - --dataset=synthetic
+      - --objects=200
+      - --queries=2
+      - --dimensions=4
+      - --k=10
+      - --partitions=4

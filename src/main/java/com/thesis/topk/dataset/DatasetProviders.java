@@ -51,7 +51,7 @@ public final class DatasetProviders {
     if (java.nio.file.Files.exists(local)) {
       return local;
     }
-    return Path.of("/opt/flink", defaultPath);
+    return Path.of("/opt/spark", defaultPath);
   }
 
   public static String names() {

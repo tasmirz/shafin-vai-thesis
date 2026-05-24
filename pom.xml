@@ -4,18 +4,21 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.thesis</groupId>
-  <artifactId>probabilistic-topk-flink</artifactId>
+  <artifactId>probabilistic-topk-spark</artifactId>
   <version>1.0.0-SNAPSHOT</version>
-  <name>Paper-Informed EMQX-Kafka-Flink Top-k Stream Processor</name>
+  <name>Paper-Informed Apache Spark Top-k Dominance Processor</name>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <flink.version>2.2.0</flink.version>
     <flink.kafka.connector.version>4.0.1-2.0</flink.kafka.connector.version>
+    <spark.version>3.5.3</spark.version>
+    <scala.binary.version>2.12</scala.binary.version>
     <junit.version>5.11.4</junit.version>
     <assertj.version>3.27.3</assertj.version>
     <jackson.version>2.15.2</jackson.version>
+    <kafka.clients.version>3.8.1</kafka.clients.version>
   </properties>
 
   <dependencies>
@@ -51,6 +54,24 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
       <version>${jackson.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <version>${kafka.clients.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-core_${scala.binary.version}</artifactId>
+      <version>${spark.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-sql_${scala.binary.version}</artifactId>
+      <version>${spark.version}</version>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -102,6 +123,16 @@
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <shadedArtifactAttached>true</shadedArtifactAttached>
               <shadedClassifierName>shaded</shadedClassifierName>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>

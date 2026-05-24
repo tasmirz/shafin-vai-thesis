@@ -9,12 +9,10 @@ K="${K:-10}"
 MISSING_RATE="${MISSING_RATE:-0.35}"
 RATE_PER_SECOND="${RATE_PER_SECOND:-200}"
 QOS="${QOS:-0}"
-WINDOW_MS="${WINDOW_MS:-10000}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
 PARTITIONS="${PARTITIONS:-4}"
 CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
-PARALLELISM="${PARALLELISM:-1}"
 SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
 MAX_EVENTS="${MAX_EVENTS:-$((OBJECTS * QUERIES))}"
 if [[ "$DATASET" == "all" ]]; then
@@ -22,6 +20,12 @@ if [[ "$DATASET" == "all" ]]; then
   MONITOR_ENV=(
     "TOPIC_MAPPINGS=thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"
     "ACTION_IDS=kafka_producer:raw_incomplete_to_kafka_thesis_raw_intel,kafka_producer:raw_incomplete_to_kafka_thesis_raw_pump,kafka_producer:raw_incomplete_to_kafka_thesis_raw_gas"
+  )
+elif [[ "$DATASET" == "intel" || "$DATASET" == "pump" || "$DATASET" == "gas" ]]; then
+  EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((OBJECTS * QUERIES))}"
+  MONITOR_ENV=(
+    "TOPIC_MAPPINGS=thesis/raw/$DATASET=thesis.raw.$DATASET"
+    "ACTION_IDS=kafka_producer:raw_incomplete_to_kafka_thesis_raw_$DATASET"
   )
 else
   EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((OBJECTS * QUERIES))}"
@@ -38,16 +42,16 @@ scripts/setup-venv.sh
 echo "== unit tests =="
 mvn test
 
-echo "== local Flink CLI stream smoke test =="
-OBJECTS=4 QUERIES=2 DIMENSIONS=4 K=2 PARALLELISM=2 SYNOPSIS_BINS=4 \
-  just run-local >/tmp/thesis-flink-local-cli.log 2>&1
-grep -q "pipelineConfig source=simulator parallelism=2" /tmp/thesis-flink-local-cli.log
-grep -q "TopKResult{" /tmp/thesis-flink-local-cli.log
+echo "== local Spark CLI smoke test =="
+OBJECTS=4 QUERIES=2 DIMENSIONS=4 K=2 PARTITIONS=2 SYNOPSIS_BINS=4 \
+  just spark >/tmp/thesis-spark-local-cli.log 2>&1
+grep -q "engine=apache-spark source=simulator" /tmp/thesis-spark-local-cli.log
+grep -q "TopKResult{" /tmp/thesis-spark-local-cli.log
 
 echo "== package and docker image =="
 mvn -q -DskipTests package
-docker build -t thesis-topk:local .
-docker run --rm --entrypoint /opt/flink/bin/flink thesis-topk:local --version | grep -q "Version: 2.2.0"
+docker build -t thesis-topk-spark:local .
+docker run --rm thesis-topk-spark:local /opt/spark/bin/spark-submit --version 2>&1 | grep -qi "spark"
 docker build -f docker/simulator/Dockerfile -t thesis-simulator:local .
 docker run --rm thesis-simulator:local --dataset=all --max-events=1 --dry-run --json >/tmp/thesis-simulator-image-check.json
 python3 -m json.tool /tmp/thesis-simulator-image-check.json >/dev/null
@@ -64,6 +68,10 @@ with Path("k8s/pipeline.yaml").open() as f:
   docs = [doc for doc in yaml.safe_load_all(f) if doc]
 if not docs:
   raise SystemExit("k8s/pipeline.yaml contains no resources")
+names = [doc.get("metadata", {}).get("name", "") for doc in docs]
+for required in ["spark-master", "spark-worker", "spark-topk-submit"]:
+  if required not in names:
+    raise SystemExit(f"missing k8s resource: {required}")
 print(f"k8s resources: {len(docs)}")
 PY
 
@@ -75,7 +83,7 @@ mvn -q -DskipTests compile exec:java \
   > reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
 tail -n 8 reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
 
-echo "== full e2e benchmark =="
+echo "== full Spark e2e benchmark =="
 OBJECTS="$OBJECTS" \
 QUERIES="$QUERIES" \
 DIMENSIONS="$DIMENSIONS" \
@@ -83,18 +91,18 @@ K="$K" \
 MISSING_RATE="$MISSING_RATE" \
 RATE_PER_SECOND="$RATE_PER_SECOND" \
 QOS="$QOS" \
-WINDOW_MS="$WINDOW_MS" \
 DATASET="$DATASET" \
 DATASET_PATH="$DATASET_PATH" \
 MAX_EVENTS="$MAX_EVENTS" \
 EXPECTED_MESSAGES="$EXPECTED_MESSAGES" \
-PARALLELISM="$PARALLELISM" \
+PARTITIONS="$PARTITIONS" \
 SYNOPSIS_BINS="$SYNOPSIS_BINS" \
 BUILD_IMAGE=0 \
+env "${MONITOR_ENV[@]}" \
 scripts/e2e-benchmark.sh
 
 echo "== monitor cli assertions =="
-env "${MONITOR_ENV[@]}" EXPECTED_MESSAGES="$EXPECTED_MESSAGES" scripts/test-monitor-cli.sh
+env "${MONITOR_ENV[@]}" EXPECTED_MESSAGES="$EXPECTED_MESSAGES" EXPECTED_TOPK="$QUERIES" scripts/test-monitor-cli.sh
 
 echo "== strict e2e artifact and live-state validation =="
 env "${MONITOR_ENV[@]}" python3 scripts/validate-e2e.py \
@@ -113,6 +121,7 @@ if ! curl -fsS http://localhost:8088/api/tests/status >/dev/null 2>&1; then
 fi
 curl -fsS http://localhost:8088/ >/tmp/thesis-monitor.html
 grep -q "Thesis Stream Monitor" /tmp/thesis-monitor.html
+grep -q "Spark Outgress" /tmp/thesis-monitor.html
 grep -q "Imputation MAE" /tmp/thesis-monitor.html
 grep -q "DD Synopsis Rules" /tmp/thesis-monitor.html
 curl -fsS http://localhost:8088/api/metrics >/tmp/thesis-monitor-metrics.json
@@ -122,7 +131,7 @@ import json
 
 with open("/tmp/thesis-monitor-metrics.json") as f:
   payload = json.load(f)
-required = ["mqtt", "kafka", "flink", "accuracy", "issues"]
+required = ["mqtt", "kafka", "spark", "accuracy", "issues"]
 missing = [key for key in required if key not in payload]
 if missing:
   raise SystemExit(f"missing monitor JSON keys: {missing}")

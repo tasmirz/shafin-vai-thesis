@@ -1,89 +1,134 @@
-# Paper-Informed EMQX-Kafka-Flink Top-k Stream Task
+# Paper-Informed Apache Spark Top-k Dominance Task
 
-This project implements a compact Apache Flink DataStream prototype for probabilistic top-k ranking over imperfect stream data. The containerized runtime uses the official `apache/flink:2.2.0-scala_2.12` Docker image.
+This project is upgraded to use **Apache Spark** as the execution layer for probabilistic top-k ranking over uncertain and imperfect data. It follows the 2025 ICCIT PTD direction by keeping the core ideas — probabilistic repair, query-relative dynamic dominance, DSCP-style LB/UB pruning, AES-style compact emission, and exact refinement — while moving the runtime from Hadoop/Flink-style execution to Spark.
 
-The implementation adapts selected incomplete-data/top-k concepts into a replacement streaming architecture:
+## Spark-first Architecture
 
-- incomplete raw records are repaired into probabilistic instances using a compact DD-style conditional-histogram synopsis;
-- ranking uses query-relative dynamic dominance;
-- local lower/upper score bounds prune obvious non-candidates;
-- exact refinement is retained for the surviving candidates;
-- keyed Flink window state updates rankings on arrivals and honors `UPSERT`/`DELETE` events;
-- a pluggable dataset provider produces imperfect stream data for testing and benchmarking.
+```text
+Raw uncertain events
+  -> Spark parallel imputation into probabilistic instances
+  -> query/object grouping
+  -> distributed LB/UB candidate-bound computation
+  -> DSCP-style kth-LB threshold pruning
+  -> exact Spark refinement for surviving object groups
+  -> TopKResult per query
+```
 
-## Command Runner
+For the full streaming-style demo, the ingress path is also Spark-based:
 
-Use the `Justfile` as the main CLI entry point:
+```text
+Python simulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka
+  -> Apache Spark bounded Kafka reader
+  -> SparkTopKEngine
+  -> TopKResult
+```
+
+Legacy Flink source files are retained only for comparison. The default build image, Docker Compose services, Kubernetes manifest, E2E scripts, validation scripts, and monitor now target Spark.
+
+## Main Commands
 
 ```bash
 just
 just test
-just venv
-just simulator-test
-just bench
-just run-local
+just spark
+just image
+just setup
+just spark-submit
 just e2e
 just validate
 just monitor-bg
 just test-all
 ```
 
-The recipes wrap the Maven, Docker Compose, curl, monitor, validation, benchmark, and Kubernetes commands used by the project.
+Run Spark locally on generated data:
 
-## Architecture Position
+```bash
+OBJECTS=1000 QUERIES=2 DIMENSIONS=4 K=10 PARTITIONS=4 just spark
+```
 
-The current code replaces the papers' offline/Spark-oriented execution setting with an EMQX MQTT -> Kafka -> Flink event-streaming implementation. It adopts incomplete-record processing, probabilistic repair, dynamic-dominance ranking, and candidate refinement concepts, then validates them through this architecture. California road data, MapReduce/aR-tree execution, and Spark are not implementation requirements for the proposed system.
+Run the Spark entry point directly:
 
-The detailed validation report is written to:
+```bash
+mvn -q -DskipTests compile exec:java \
+  -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
+  -Dexec.args="--source=simulator --dataset=synthetic --objects=1000 --queries=2 --dimensions=4 --k=10 --partitions=4 --sparkMaster=local[*]"
+```
+
+## Docker Compose
+
+Build the Spark runtime image:
+
+```bash
+just image
+```
+
+Start Kafka, EMQX, Spark master, and Spark worker:
+
+```bash
+just setup
+```
+
+Spark services exposed by `docker-compose.e2e.yml`:
+
+- Spark master RPC: `spark://localhost:7077`
+- Spark master UI: `http://localhost:8080`
+- Spark worker UI: `http://localhost:8081`
+- Kafka external listener: `localhost:29092`
+- EMQX MQTT: `localhost:18884`
+- EMQX dashboard/API: `http://localhost:18084`
+
+Submit the bounded Kafka Spark job to the Compose Spark cluster:
+
+```bash
+EXPECTED_MESSAGES=400 OBJECTS=200 QUERIES=2 K=10 just spark-submit
+```
+
+Run the full Dockerized E2E benchmark:
+
+```bash
+OBJECTS=200 QUERIES=2 DIMENSIONS=4 K=10 MISSING_RATE=0.35 \
+RATE_PER_SECOND=200 QOS=0 PARTITIONS=4 just e2e
+```
+
+E2E artifacts:
 
 ```text
-reports/validation/paper-alignment.md
+reports/e2e/summary.md
+reports/e2e/summary.csv
+reports/e2e/spark.log
+reports/e2e/spark-submit.log
 ```
 
-The current EMQX/Kafka/Flink implementation report is written to:
+## Kubernetes
 
-```text
-reports/implementation/emqx-kafka-flink-implementation-report.md
-```
-
-The algorithm benchmark reports metrics of the implemented Flink-oriented analytics path:
-
-- exact baseline runtime;
-- certified pruning runtime and exact top-k agreement;
-- fast candidate-pruning runtime;
-- precision@k against this implementation's exact ranking;
-- candidate communication-reduction proxy;
-- partitioned candidate refinement and calculated shuffle-write proxy bytes.
-- masked-holdout imputation MAE and learned synopsis size.
-
-These metrics are reported for this architecture: Spark is not executing the benchmark and shuffle proxy values are not presented as Spark metrics. The implemented MAE evaluates masked holdout fields; ground-truth F-score/Precision@k over a controlled complete Intel/Pump/Gas input protocol remains an accuracy-evaluation extension.
-
-## Run Tests
+Build the image and make it available to your cluster, then apply the manifest:
 
 ```bash
-just test
+just image
+just simulator-image
+just k8s-apply
+just k8s-pods
+just k8s-logs
 ```
 
-## Run Benchmark
+The Kubernetes manifest creates:
 
-```bash
-OBJECTS=1000 MISSING_RATE=0.25 just bench
-```
+- `Namespace/thesis-streaming`
+- `StatefulSet/kafka`
+- `Deployment/emqx`
+- `Deployment/incomplete-data-publisher`
+- `Deployment/spark-master`
+- `Deployment/spark-worker`
+- `Job/spark-topk-submit`
 
-The benchmark defaults to `DATASET=synthetic`, `PARTITIONS=4`, and `CANDIDATE_MULTIPLIER=4`:
-
-```bash
-OBJECTS=1000 QUERIES=2 DIMENSIONS=4 K=10 \
-DATASET=synthetic PARTITIONS=4 CANDIDATE_MULTIPLIER=4 SYNOPSIS_BINS=8 \
-just bench
-```
+The Spark submit job consumes Kafka topics and submits to `spark://spark-master:7077`.
 
 ## Dataset Providers
 
 Datasets are selected through the same CLI surface used by the synthetic generator:
 
 ```bash
-DATASET=csv DATASET_PATH=/path/to/events.csv just bench
+DATASET=csv DATASET_PATH=/path/to/events.csv just spark
 ```
 
 Built-in providers:
@@ -95,21 +140,22 @@ Built-in providers:
 - `gas`: `datasets-raw/gas+sensors+for+home+activity+monitoring.zip`.
 - `all`: Intel, pump, and gas together, processed as separate query families.
 
-The CSV provider is intentionally small so new datasets can be adapted later. It expects a header with:
+CSV header format:
 
 ```text
 objectId,queryId,eventTime,opType,a0,a1,a2,...
 ```
 
-`opType` may be blank and defaults to `UPSERT`. Missing values can be blank, `null`, `NaN`, or `?`. Attribute columns can either be named `a0`, `a1`, ... or placed after `opType`. The loader reuses the current default imputation-rule and query-point generators until dataset-specific rules/query files are added.
+Missing values can be blank, `null`, `NaN`, or `?`. `opType` may be blank and defaults to `UPSERT`.
 
-For Docker Compose or Kubernetes runs, `DATASET_PATH` must be a path visible inside the container, so mount the dataset file or bake it into the image before switching the runtime from `synthetic` to `csv`.
+For Docker/Kubernetes runs, `DATASET_PATH` must be visible inside the container. The Spark image looks under `/opt/spark/datasets-raw` for baked-in raw datasets.
 
-The sender is decoupled from the Flink Java job in [scripts/simulator.py](scripts/simulator.py). It performs dataset preprocessing in Python before publishing normalized JSON records. Set up its isolated dependencies and test all built-in preprocessors with:
+## MQTT/Kafka Ingress
 
-```bash
-just venv
-just simulator-test
+The simulator publishes normalized JSON records such as:
+
+```json
+{"objectId":"obj-1","queryId":"q0","eventTime":1700000000000,"opType":"UPSERT","attributes":[0.42,null,0.7],"missingMask":[false,true,false]}
 ```
 
 With `DATASET=all`, each raw dataset is published to a separate MQTT topic and bridged to a separate Kafka topic:
@@ -120,152 +166,44 @@ thesis/raw/pump  -> thesis.raw.pump
 thesis/raw/gas   -> thesis.raw.gas
 ```
 
-Run a small all-dataset E2E smoke test:
+Run a small all-dataset Spark E2E smoke test:
 
 ```bash
-DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 just e2e
+DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 QUERIES=1 K=2 just e2e
 ```
 
-## Run Local Flink Job On The JVM
+## Monitoring and Validation
 
-```bash
-OBJECTS=200 QUERIES=2 K=5 PARALLELISM=2 SYNOPSIS_BINS=8 just run-local
-```
-
-## MQTT -> Kafka -> Flink Stream
-
-The streaming ingress uses EMQX as the MQTT broker. EMQX is configured with a Kafka producer connector, a Kafka sink action, and a rule that forwards MQTT messages from `thesis/raw` to the Kafka topic `thesis.raw.incomplete`. The Flink job can then consume the Kafka topic instead of the in-memory simulator.
-
-Incomplete records are JSON messages shaped like:
-
-```json
-{"objectId":"obj-1","queryId":"q0","eventTime":1700000000000,"opType":"UPSERT","attributes":[0.42,null,0.7],"missingMask":[false,true,false]}
-```
-
-Run the Python MQTT publisher against a local broker:
-
-```bash
-OBJECTS=200 QUERIES=2 MISSING_RATE=0.35 just publish-local
-```
-
-Run the Flink job from Kafka:
-
-```bash
-OBJECTS=200 QUERIES=2 K=5 just run-kafka-local
-```
-
-Run the same job in the Apache Flink Docker session cluster:
-
-```bash
-just image
-just setup-fast
-OBJECTS=200 QUERIES=2 K=5 just flink-submit
-```
-
-The Flink Web UI is exposed at `http://localhost:8081`.
-
-`PARALLELISM` and `SYNOPSIS_BINS` are available on the local, E2E, submit, and full-test recipes. The Kubernetes manifest runs the Flink job with `--parallelism=2` and `--synopsisBins=8`.
-
-## Kubernetes
-
-Build the local image:
-
-```bash
-just image
-```
-
-For kind or minikube, make sure the image is available inside the cluster, then apply the manifest:
-
-```bash
-just k8s-apply
-just k8s-pods
-just k8s-logs
-```
-
-The Kubernetes flow is:
-
-```text
-Python simulator -> thesis/raw/intel, thesis/raw/pump, thesis/raw/gas
-  -> EMQX Kafka actions
-  -> thesis.raw.intel, thesis.raw.pump, thesis.raw.gas
-  -> Apache Flink application cluster
-```
-
-## Full E2E Benchmark
-
-Start and configure the local Docker-backed services with scripts and EMQX HTTP API calls:
-
-```bash
-just setup
-```
-
-This builds `thesis-topk:local` from `apache/flink:2.2.0-scala_2.12`, creates `.venv` for the Python simulator, starts Kafka, EMQX, Flink JobManager, and Flink TaskManager, creates the Kafka topic, then calls `scripts/configure-emqx.sh`, which uses `curl` against the EMQX dashboard API to create:
-
-- Kafka producer connector: `kafka_ingress`
-- Kafka producer action: `raw_incomplete_to_kafka`
-- MQTT-to-Kafka rule: `mqtt_raw_to_kafka`
-
-Run the full E2E benchmark:
-
-```bash
-OBJECTS=200 QUERIES=2 DIMENSIONS=4 K=10 MISSING_RATE=0.35 \
-RATE_PER_SECOND=200 QOS=0 WINDOW_MS=10000 \
-just e2e
-```
-
-The benchmark starts Kafka, EMQX, and the Apache Flink Docker session cluster, publishes incomplete records through MQTT, waits until EMQX has written them to Kafka, then submits Flink in bounded Kafka mode. Results are written to:
-
-```text
-reports/e2e/summary.md
-reports/e2e/summary.csv
-reports/e2e/flink.log
-reports/e2e/flink-submit.log
-```
-
-Start the realtime monitor GUI:
+Start the monitor:
 
 ```bash
 PORT=8088 just monitor
 ```
 
-Open:
+The monitor reads Spark logs and E2E summary files, then reports MQTT, Kafka, Spark TopKResult count, ingestion completeness, pruning metrics, and imputation MAE.
 
-```text
-http://localhost:8088
-```
-
-The monitor polls EMQX, Kafka, and Flink output and shows MQTT ingress, per-topic Kafka traffic, Flink outgress, bridge failures/drops, completeness, top-k agreement, prune ratio, and current issues. Its **Run Full CLI Tests** and **Run Raw Topics E2E** controls start CLI test jobs and stream the verbose log in the page.
-
-Test the monitor metrics from the CLI:
+Validate the latest run:
 
 ```bash
-just monitor-check 400
+EXPECTED_MESSAGES=400 QUERIES=2 just validate
 ```
 
-Strictly validate the latest E2E benchmark artifacts and live service state from the CLI:
+Run full checks:
 
 ```bash
-just validate 400
-```
-
-Run the full verification suite, including unit tests, Docker image build, compose and Kubernetes YAML validation, algorithm performance benchmark, Dockerized E2E benchmark, monitor CLI assertions, and GUI HTTP smoke test:
-
-```bash
-OBJECTS=200 QUERIES=2 DIMENSIONS=4 K=10 MISSING_RATE=0.35 \
-RATE_PER_SECOND=200 QOS=0 WINDOW_MS=10000 \
 just test-all
 ```
 
-Keep the verbose run log used by the GUI:
+## Reports
 
-```bash
-just test-all-verbose
+Spark upgrade report:
+
+```text
+reports/implementation/spark-upgrade-report.md
 ```
 
-For Kubernetes, build both local images before applying the manifest:
+Paper alignment report:
 
-```bash
-just image
-just simulator-image
-just k8s-apply
+```text
+reports/validation/paper-alignment.md
 ```

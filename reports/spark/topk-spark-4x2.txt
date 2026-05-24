@@ -1,0 +1,5 @@
+engine=apache-spark source=simulator dataset=intel k=2 partitions=2 elapsedMs=3990
+rawEvents=8 probabilisticInstances=8 synopsisRules=4 synopsisBins=4
+TopKResult{engine=apache-spark, queryId=intel, objects=1, refined=1, pruned=0, pruneRatio=0.0000, tau=-Infinity, compactShuffleRecords=1}
+query=intel objects=1 refined=1 pruned=0 pruneRatio=0.0000 tau=-Infinity compactShuffleRecords=1
+  rank object=intel-mote-1 score=0.000000 lb=0.000000 ub=0.000000 instances=8

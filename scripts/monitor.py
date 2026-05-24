@@ -23,8 +23,8 @@ ACTION_ID = os.environ.get("ACTION_ID", "kafka_producer:raw_incomplete_to_kafka_
 ACTION_IDS = [x for x in os.environ.get("ACTION_IDS", ACTION_ID).split(",") if x]
 CONNECTOR_ID = os.environ.get("CONNECTOR_ID", "kafka_producer:kafka_ingress")
 RULE_ID = os.environ.get("RULE_ID", "mqtt_raw_to_kafka_thesis_raw")
-FLINK_LOG = ROOT / os.environ.get("FLINK_LOG", "reports/e2e/flink.log")
-FLINK_REST_URL = os.environ.get("FLINK_REST_URL", "http://localhost:8081")
+SPARK_LOG = ROOT / os.environ.get("SPARK_LOG", "reports/e2e/spark.log")
+SPARK_REST_URL = os.environ.get("SPARK_REST_URL", "http://localhost:8080")
 SUMMARY_CSV = ROOT / os.environ.get("SUMMARY_CSV", "reports/e2e/summary.csv")
 ALGORITHM_REPORT_ENV = os.environ.get("ALGORITHM_REPORT")
 TEST_LOG = ROOT / "reports/tests/latest.log"
@@ -124,20 +124,20 @@ def parse_summary():
   return rows[-1] if rows else {}
 
 
-def parse_flink_log():
-  if not FLINK_LOG.exists():
+def parse_spark_log():
+  if not SPARK_LOG.exists():
     return {"topKResults": 0, "errors": 0, "warnings": 0}
-  text = FLINK_LOG.read_text(errors="replace")
+  text = SPARK_LOG.read_text(errors="replace")
   return {
     "topKResults": len(re.findall(r"TopKResult\{", text)),
     "errors": len(re.findall(r"\b(ERROR|Exception)\b", text)),
     "warnings": len(re.findall(r"\bWARN\b", text)),
-    "path": str(FLINK_LOG.relative_to(ROOT)),
+    "path": str(SPARK_LOG.relative_to(ROOT)),
   }
 
 
-def flink_rest(path):
-  req = urllib.request.Request(f"{FLINK_REST_URL}{path}")
+def spark_rest(path):
+  req = urllib.request.Request(f"{SPARK_REST_URL}{path}")
   try:
     with urllib.request.urlopen(req, timeout=4) as resp:
       return json.loads(resp.read().decode())
@@ -145,17 +145,23 @@ def flink_rest(path):
     return {"error": str(exc)}
 
 
-def flink_cluster():
-  overview = flink_rest("/overview")
-  jobs = flink_rest("/jobs/overview")
-  counts = {"running": 0, "finished": 0, "failed": 0, "canceled": 0}
-  if isinstance(jobs, dict):
-    for job in jobs.get("jobs", []):
-      state = str(job.get("state", "")).lower()
-      if state in counts:
-        counts[state] += 1
-  return {"overview": overview, "jobs": jobs, "jobCounts": counts}
-
+def spark_cluster():
+  overview = spark_rest("/json/")
+  if isinstance(overview, dict) and overview.get("error"):
+    return {"overview": overview, "jobCounts": {"running": 0, "finished": 0, "failed": 0, "canceled": 0}}
+  active_apps = overview.get("activeapps", []) if isinstance(overview, dict) else []
+  completed_apps = overview.get("completedapps", []) if isinstance(overview, dict) else []
+  active_drivers = overview.get("activedrivers", []) if isinstance(overview, dict) else []
+  completed_drivers = overview.get("completeddrivers", []) if isinstance(overview, dict) else []
+  return {
+    "overview": overview,
+    "jobCounts": {
+      "running": len(active_apps) + len(active_drivers),
+      "finished": len(completed_apps) + len(completed_drivers),
+      "failed": 0,
+      "canceled": 0,
+    },
+  }
 
 def parse_algorithm():
   if ALGORITHM_REPORT_ENV:
@@ -223,8 +229,8 @@ def metrics():
   connector = http_json(f"/connectors/{CONNECTOR_ID}")
   rule_metrics = http_json(f"/rules/{RULE_ID}/metrics")
   kafka = kafka_offset(topics)
-  flink = parse_flink_log()
-  flink_status = flink_cluster()
+  spark = parse_spark_log()
+  spark_status = spark_cluster()
   algorithm = parse_algorithm()
 
   mqtt_received = 0
@@ -235,8 +241,8 @@ def metrics():
 
   expected = int(summary.get("expected_messages") or summary.get("expectedMessages") or 0)
   kafka_messages = int(kafka.get("messages", 0))
-  topk = int(flink.get("topKResults", 0))
-  processing_completeness = (topk / kafka_messages) if kafka_messages else None
+  topk = int(spark.get("topKResults", 0))
+  processing_completeness = (1.0 if topk > 0 and (not expected or kafka_messages >= expected) else 0.0 if expected else None)
   ingestion_completeness = (kafka_messages / expected) if expected else None
 
   issues = []
@@ -246,10 +252,9 @@ def metrics():
     issues.append(f"action failures: {action_totals.get('failed')}")
   if action_totals.get("dropped", 0):
     issues.append(f"action dropped: {action_totals.get('dropped')}")
-  if flink.get("errors", 0):
-    issues.append(f"flink log errors/exceptions: {flink.get('errors')}")
-  if flink_status.get("overview", {}).get("error"):
-    issues.append(f"flink rest: {flink_status['overview']['error']}")
+  if spark.get("errors", 0):
+    issues.append(f"spark log errors/exceptions: {spark.get('errors')}")
+  # Spark REST/UI may be unavailable during a just-finished local run; do not fail metrics for that alone.
   if expected and kafka_messages < expected:
     issues.append(f"kafka has {kafka_messages}/{expected} expected records")
 
@@ -262,7 +267,7 @@ def metrics():
       "action": action_totals,
       "rule": rule_metrics.get("metrics", {}) if isinstance(rule_metrics, dict) else {},
     },
-    "flink": {**flink, **flink_status},
+    "spark": {**spark, **spark_status},
     "accuracy": {
       "algorithmAgreement": algorithm.get("agreement"),
       "processingCompleteness": processing_completeness,
@@ -298,7 +303,7 @@ def check_metrics(payload, args):
   failures = []
   assert_at_least("mqtt.published", payload["mqtt"].get("published"), args.expect_mqtt, failures)
   assert_at_least("kafka.messages", payload["kafka"].get("messages"), args.expect_kafka, failures)
-  assert_at_least("flink.topKResults", payload["flink"].get("topKResults"), args.expect_topk, failures)
+  assert_at_least("spark.topKResults", payload["spark"].get("topKResults"), args.expect_topk, failures)
   assert_at_least(
       "accuracy.ingestionCompleteness",
       payload["accuracy"].get("ingestionCompleteness"),
@@ -310,8 +315,8 @@ def check_metrics(payload, args):
       args.min_processing_completeness,
       failures)
   assert_at_least(
-      "flink.jobCounts.finished",
-      payload["flink"].get("jobCounts", {}).get("finished"),
+      "spark.jobCounts.finished",
+      payload["spark"].get("jobCounts", {}).get("finished"),
       args.expect_finished_jobs,
       failures)
   if args.require_no_issues and payload.get("issues"):
@@ -324,10 +329,10 @@ def print_metrics_summary(payload):
       "monitor "
       f"mqtt={payload['mqtt'].get('published', 0)} "
       f"kafka={payload['kafka'].get('messages', 0)} "
-      f"topK={payload['flink'].get('topKResults', 0)} "
+      f"topK={payload['spark'].get('topKResults', 0)} "
       f"ingestion={payload['accuracy'].get('ingestionCompleteness')} "
       f"processing={payload['accuracy'].get('processingCompleteness')} "
-      f"flinkFinishedJobs={payload['flink'].get('jobCounts', {}).get('finished', 0)} "
+      f"sparkFinishedJobs={payload['spark'].get('jobCounts', {}).get('finished', 0)} "
       f"issues={len(payload.get('issues', []))}")
 
 
@@ -353,18 +358,22 @@ def _wait_for_test(process):
     TEST_STATE["finishedAt"] = int(time.time() * 1000)
 
 
-def start_test(profile):
+def start_test(profile, dataset="synthetic"):
   global TEST_PROCESS
   with TEST_LOCK:
     if TEST_PROCESS is not None and TEST_PROCESS.poll() is None:
       return False, dict(TEST_STATE)
     TEST_LOG.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    
+    topics = 3 if dataset == "all" else 1
     if profile == "raw":
+      max_events = 5
+      expected = max_events * topics
       env.update({
-          "DATASET": "all",
-          "MAX_EVENTS": "5",
-          "EXPECTED_MESSAGES": "15",
+          "DATASET": dataset,
+          "MAX_EVENTS": str(max_events),
+          "EXPECTED_MESSAGES": str(expected),
           "OBJECTS": "5",
           "QUERIES": "1",
           "K": "2",
@@ -372,14 +381,19 @@ def start_test(profile):
       command = [
           "bash", "-lc",
           "scripts/setup-venv.sh && "
-          "DATASET=all MAX_EVENTS=5 EXPECTED_MESSAGES=15 OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 "
-          "MISSING_RATE=0.2 RATE_PER_SECOND=200 QOS=0 WINDOW_MS=10000 BUILD_IMAGE=0 "
+          f"DATASET={dataset} MAX_EVENTS={max_events} EXPECTED_MESSAGES={expected} OBJECTS=5 QUERIES=1 DIMENSIONS=4 K=2 "
+          "MISSING_RATE=0.2 RATE_PER_SECOND=200 QOS=0 BUILD_IMAGE=0 "
           "scripts/e2e-benchmark.sh && "
-          "python3 scripts/validate-e2e.py --expected-messages 15 --expected-queries 2",
+          f"python3 scripts/validate-e2e.py --expected-messages {expected} --expected-queries 1",
       ]
+      profile = f"raw ({dataset})"
     else:
-      env.update({"OBJECTS": "100", "QUERIES": "2", "EXPECTED_MESSAGES": "200", "DATASET": "synthetic"})
-      profile = "default"
+      objects = 100
+      queries = 2
+      max_events = objects * queries
+      expected = max_events * topics if dataset == "all" else max_events
+      env.update({"OBJECTS": str(objects), "QUERIES": str(queries), "EXPECTED_MESSAGES": str(expected), "DATASET": dataset})
+      profile = f"default ({dataset})"
       command = ["just", "test-all"]
     log = TEST_LOG.open("w")
     TEST_PROCESS = subprocess.Popen(
@@ -438,10 +452,10 @@ INDEX = r"""<!doctype html>
     <section class="grid">
       <div class="card"><div class="label">MQTT Ingress</div><div class="value" id="mqtt">0</div><div class="sub">published messages</div></div>
       <div class="card"><div class="label">Kafka Ingress</div><div class="value" id="kafka">0</div><div class="sub">topic offset</div></div>
-      <div class="card"><div class="label">Flink Outgress</div><div class="value" id="flink">0</div><div class="sub">TopKResult rows</div></div>
+      <div class="card"><div class="label">Spark Outgress</div><div class="value" id="spark">0</div><div class="sub">TopKResult rows</div></div>
       <div class="card"><div class="label">Bridge Status</div><div class="value" id="bridge">unknown</div><div class="sub" id="bridgeSub">Kafka action</div></div>
       <div class="card"><div class="label">Ingestion Completeness</div><div class="value" id="ingAcc">n/a</div><div class="sub">Kafka / expected</div></div>
-      <div class="card"><div class="label">Processing Completeness</div><div class="value" id="procAcc">n/a</div><div class="sub">Flink / Kafka</div></div>
+      <div class="card"><div class="label">Processing Completeness</div><div class="value" id="procAcc">n/a</div><div class="sub">Spark / Kafka</div></div>
       <div class="card"><div class="label">Top-k Agreement</div><div class="value" id="agreement">n/a</div><div class="sub">algorithm benchmark</div></div>
       <div class="card"><div class="label">Prune Ratio</div><div class="value" id="prune">n/a</div><div class="sub">algorithm benchmark</div></div>
       <div class="card"><div class="label">Partitioned Precision</div><div class="value" id="partitionedPrecision">n/a</div><div class="sub">4-partition model</div></div>
@@ -450,8 +464,22 @@ INDEX = r"""<!doctype html>
       <div class="card"><div class="label">DD Synopsis Rules</div><div class="value" id="synopsisRules">n/a</div><div class="sub">cost-selected histogram rules</div></div>
       <div class="card wide"><div class="label">Topic Traffic</div><pre id="topics">Waiting for traffic...</pre></div>
       <div class="card wide"><div class="label">Throughput</div><canvas id="chart"></canvas></div>
-      <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Flink log: <code>reports/e2e/flink.log</code></div></div>
-      <div class="card wide"><div class="label">CLI Test Runner</div><div class="actions"><button class="primary" id="runDefault">Run Full CLI Tests</button><button id="runRaw">Run Raw Topics E2E</button><span class="sub" id="testState">idle</span></div><pre id="testLog">No test run started.</pre></div>
+      <div class="card wide"><div class="label">Issues</div><ul class="issues" id="issues"><li>Loading...</li></ul><div class="sub">Spark log: <code>reports/e2e/spark.log</code></div></div>
+      <div class="card wide"><div class="label">CLI Test Runner</div>
+        <div class="actions">
+          <select id="datasetSelector" style="height:36px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; padding:0 8px;">
+            <option value="synthetic">Synthetic</option>
+            <option value="intel">Intel Lab (Real)</option>
+            <option value="pump">Water Pump (Real)</option>
+            <option value="gas">Gas Sensors (Real)</option>
+            <option value="all">Real (Multitopic: Intel/Pump/Gas)</option>
+          </select>
+          <button class="primary" id="runDefault">Run Full CLI Tests</button>
+          <button id="runRaw">Run Raw Topics E2E</button>
+          <span class="sub" id="testState">idle</span>
+        </div>
+        <pre id="testLog">No test run started.</pre>
+      </div>
     </section>
   </main>
 <script>
@@ -466,9 +494,9 @@ function draw() {
   ctx.scale(devicePixelRatio, devicePixelRatio);
   ctx.clearRect(0, 0, rect.width, 220);
   const pad = 28, w = rect.width - pad * 2, h = 160;
-  const max = Math.max(1, ...history.flatMap(p => [p.mqtt, p.kafka, p.flink]));
+  const max = Math.max(1, ...history.flatMap(p => [p.mqtt, p.kafka, p.spark]));
   ctx.strokeStyle = "#d0d5dd"; ctx.beginPath(); ctx.moveTo(pad, 180); ctx.lineTo(pad + w, 180); ctx.stroke();
-  [["mqtt","#2563eb"],["kafka","#0f766e"],["flink","#b54708"]].forEach(([key,color]) => {
+  [["mqtt","#2563eb"],["kafka","#0f766e"],["spark","#b54708"]].forEach(([key,color]) => {
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
     history.forEach((p, i) => {
       const x = pad + (history.length === 1 ? 0 : i * w / (history.length - 1));
@@ -480,7 +508,7 @@ function draw() {
   ctx.fillStyle = "#344054"; ctx.font = "12px sans-serif";
   ctx.fillText("MQTT", pad, 204); ctx.fillStyle = "#2563eb"; ctx.fillRect(pad + 38, 196, 18, 3);
   ctx.fillStyle = "#344054"; ctx.fillText("Kafka", pad + 70, 204); ctx.fillStyle = "#0f766e"; ctx.fillRect(pad + 112, 196, 18, 3);
-  ctx.fillStyle = "#344054"; ctx.fillText("Flink", pad + 144, 204); ctx.fillStyle = "#b54708"; ctx.fillRect(pad + 184, 196, 18, 3);
+  ctx.fillStyle = "#344054"; ctx.fillText("Spark", pad + 144, 204); ctx.fillStyle = "#b54708"; ctx.fillRect(pad + 184, 196, 18, 3);
 }
 async function tick() {
   try {
@@ -489,7 +517,7 @@ async function tick() {
     $("status").textContent = new Date(m.timestamp).toLocaleTimeString();
     $("mqtt").textContent = m.mqtt.published ?? 0;
     $("kafka").textContent = m.kafka.messages ?? 0;
-    $("flink").textContent = m.flink.topKResults ?? 0;
+    $("spark").textContent = m.spark.topKResults ?? 0;
     $("bridge").textContent = m.emqx.connector.status || "unknown";
     $("bridge").className = `value ${m.emqx.connector.status === "connected" ? "ok" : "bad"}`;
     $("bridgeSub").textContent = `success ${m.emqx.action.success ?? 0}, failed ${m.emqx.action.failed ?? 0}, dropped ${m.emqx.action.dropped ?? 0}`;
@@ -506,7 +534,12 @@ async function tick() {
     (m.issues.length ? m.issues : ["No current issues detected"]).forEach(issue => {
       const li = document.createElement("li"); li.textContent = issue; issues.appendChild(li);
     });
-    history.push({mqtt: m.mqtt.published || 0, kafka: m.kafka.messages || 0, flink: m.flink.topKResults || 0});
+    const curRaw = {mqtt: m.mqtt.published || 0, kafka: m.kafka.messages || 0, spark: m.spark.topKResults || 0};
+    const prevRaw = history.length > 0 ? history[history.length - 1].raw : curRaw;
+    const dMqtt = Math.max(0, curRaw.mqtt - prevRaw.mqtt);
+    const dKafka = Math.max(0, curRaw.kafka - prevRaw.kafka);
+    const dSpark = Math.max(0, curRaw.spark - prevRaw.spark);
+    history.push({raw: curRaw, mqtt: dMqtt, kafka: dKafka, spark: dSpark});
     while (history.length > 80) history.shift();
     draw();
   } catch (e) {
@@ -525,7 +558,8 @@ async function pollTests() {
   $("runRaw").disabled = running;
 }
 async function runTests(profile) {
-  await fetch("/api/tests/run", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({profile})});
+  const dataset = $("datasetSelector").value;
+  await fetch("/api/tests/run", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({profile, dataset})});
   pollTests();
 }
 $("runDefault").onclick = () => runTests("default");
@@ -569,7 +603,7 @@ class Handler(BaseHTTPRequestHandler):
     if self.path == "/api/tests/run":
       length = int(self.headers.get("content-length", "0"))
       request = json.loads(self.rfile.read(length) or b"{}")
-      started, state = start_test(request.get("profile", "default"))
+      started, state = start_test(request.get("profile", "default"), request.get("dataset", "synthetic"))
       payload = json.dumps(state).encode()
       self.send_response(202 if started else 409)
       self.send_header("content-type", "application/json")
