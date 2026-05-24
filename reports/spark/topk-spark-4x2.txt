@@ -1,12 +1,5 @@
-engine=apache-spark source=simulator dataset=all k=2 partitions=2 elapsedMs=10716
-rawEvents=24 probabilisticInstances=32 synopsisRules=65 synopsisBins=4
+engine=apache-spark source=simulator dataset=intel k=2 partitions=2 elapsedMs=3990
+rawEvents=8 probabilisticInstances=8 synopsisRules=4 synopsisBins=4
 TopKResult{engine=apache-spark, queryId=intel, objects=1, refined=1, pruned=0, pruneRatio=0.0000, tau=-Infinity, compactShuffleRecords=1}
 query=intel objects=1 refined=1 pruned=0 pruneRatio=0.0000 tau=-Infinity compactShuffleRecords=1
   rank object=intel-mote-1 score=0.000000 lb=0.000000 ub=0.000000 instances=8
-TopKResult{engine=apache-spark, queryId=pump-normal, objects=8, refined=8, pruned=0, pruneRatio=0.0000, tau=0.000000, compactShuffleRecords=8}
-query=pump-normal objects=8 refined=8 pruned=0 pruneRatio=0.0000 tau=0.000000 compactShuffleRecords=8
-  rank object=pump-row-0 score=0.250000 lb=0.000000 ub=0.750000 instances=2
-  rank object=pump-row-1 score=0.250000 lb=0.000000 ub=0.750000 instances=2
-TopKResult{engine=apache-spark, queryId=gas, objects=1, refined=1, pruned=0, pruneRatio=0.0000, tau=-Infinity, compactShuffleRecords=1}
-query=gas objects=1 refined=1 pruned=0 pruneRatio=0.0000 tau=-Infinity compactShuffleRecords=1
-  rank object=gas-id-0 score=0.000000 lb=0.000000 ub=0.000000 instances=8
