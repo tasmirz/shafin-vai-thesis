@@ -7,14 +7,18 @@ This project is upgraded to use **Apache Spark** as the execution layer for prob
 ```text
 Raw uncertain events
   -> Spark parallel imputation into probabilistic instances
-  -> query/object grouping
-  -> distributed LB/UB candidate-bound computation
+  -> deterministic object-to-server partition assignment
+  -> conservative partition-local LB/UB candidate-bound computation
   -> selectable treatment: baseline | DSCP-only | AES-only | AES + DSCP
-  -> optional DSCP-style kth-LB threshold pruning
-  -> expanded or AES-aggregated Spark emission/shuffle stage
+  -> optional DSCP-style per-partition kth-LB threshold pruning
+  -> expanded or AES-aggregated same-partition emission/shuffle stage
   -> exact Spark refinement for surviving object groups
   -> TopKResult per query
 ```
+
+The current filter uses an index-free conservative upper allowance for remote partitions. It no
+longer computes a global exact score during filtering. Paper-faithful MBR/aR-tree tightening is
+reserved for the spatial uncertain-object adapter described below.
 
 For the finite streaming benchmark, ingress is handled by Spark Structured Streaming:
 
@@ -155,6 +159,23 @@ Built-in providers:
 - `gas`: `datasets-raw/gas+sensors+for+home+activity+monitoring.zip`.
 - `all`: Intel, pump, and gas together, processed as separate query families.
 
+### Bangladesh OSM Preparation Gate
+
+The local `datasets-osm/` source material is intentionally not committed. Its reproducible
+pre-curation contract is tracked in `config/research/bangladesh-osm-replication.json`.
+Validate that the supplied HOTOSM/OpenStreetMap export is suitable for the next road-to-MBR
+curation step:
+
+```bash
+just osm-prepare-check
+```
+
+The check verifies the recorded OSM snapshot, attribution, bounding-box metadata, metric-CRS
+plan and sufficient `LINESTRING` features for a baseline-scale run. It does not yet construct
+MBRs or sample probabilistic instances. That subsequent step must preserve the declared
+5-11 equal-probability samples per segment, object-level random server assignment and a
+spatial index per partition.
+
 CSV header format:
 
 ```text
@@ -182,6 +203,9 @@ RUN_ID=paper-ablation BUILD_IMAGE=0 just ablation-test
 Selectable algorithm IDs are `baseline`, `dscp-only`, `aes-only`, and `aes-dscp`.
 Each saved query records the executed emitted-record count, baseline/AES emission counts,
 `AER`, pruning ratio, and the exact-oracle `falsePrunes` audit.
+Saved Spark runs also record that their current bound mode is
+`partition-local-conservative-no-mbr`; they are ablation-control evidence, not yet an OSM
+paper-reproduction result.
 
 The fixture is `tests/fixtures/csv/smartphone-small.csv`. To exercise another normalized CSV:
 

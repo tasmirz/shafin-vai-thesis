@@ -95,6 +95,8 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
           "algorithm": engine.get("algorithm"),
           "dscpEnabled": engine.get("dscp") == "true" if "dscp" in engine else None,
           "aesEnabled": engine.get("aes") == "true" if "aes" in engine else None,
+          "boundMode": engine.get("boundMode"),
+          "emissionScope": engine.get("emissionScope"),
           "rawEvents": int(count_match.group(1)) if count_match else None,
           "probabilisticInstances": int(count_match.group(2)) if count_match else None,
           "structuredStreamingKafka": "reader=structured-streaming" in spark_log,

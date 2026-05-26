@@ -1,0 +1,43 @@
+{
+  "profile": "bangladesh-osm-road-mbr",
+  "baselinePaper": "papers/s10115-023-01917-3(Target Paper).pdf",
+  "upgradePaper": "papers/An_Efficient_Distributed_Framework_for_Top-k_Dominating_Query_Over_Uncertain_Databases.pdf",
+  "source": {
+    "type": "HOTOSM/OpenStreetMap road export",
+    "dataPath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/roads.gpkg",
+    "metadataPath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/metadata.json",
+    "readmePath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/README.txt",
+    "expectedSnapshot": "2026-05-10",
+    "requiredGeometryType": "LINESTRING",
+    "minimumLineFeatures": 98451,
+    "license": "ODbL-1.0"
+  },
+  "geometry": {
+    "sourceCrs": "EPSG:4326",
+    "projectedCrs": "EPSG:9678",
+    "projectedUnits": "metre",
+    "objectDefinition": "one uncertain object per cleaned road line/segment MBR",
+    "zeroAreaMbrPolicy": "expand degenerate MBR axis by 1 metre",
+    "segmentPolicyPendingDecision": "use line features directly or split long OSM ways before MBR creation"
+  },
+  "uncertainty": {
+    "instancesPerObject": {
+      "minimum": 5,
+      "maximum": 11
+    },
+    "sampling": "uniform within MBR",
+    "probability": "equal per instance and normalized per object",
+    "randomSeed": 42
+  },
+  "distribution": {
+    "assignment": "random object-level assignment to N server partitions",
+    "serverCountsToEvaluate": [1, 2, 5, 8, 10],
+    "indexRequired": "one spatial summary/index per server partition"
+  },
+  "status": {
+    "sourceReadiness": "validated by scripts/research/validate_osm_source.py",
+    "curation": "pending geometry conversion and instance generation",
+    "sparkAdapter": "pending paper-shaped probabilistic-instance provider",
+    "paperReproductionClaim": "not permitted until curation, spatial indexing, and validation are complete"
+  }
+}

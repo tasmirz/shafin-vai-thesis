@@ -98,6 +98,10 @@ csv-test:
 ablation-test:
     SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_ablation_suite.sh
 
+# validate locally supplied Bangladesh OSM roads against the paper curation protocol
+osm-prepare-check:
+    tests/integration/test_osm_preparation.sh
+
 # run MQTT -> Kafka -> Spark Structured Streaming E2E and save its artifacts
 stream-test:
     RUN_ID={{ run_id }} ALGORITHM={{ algorithm }} OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \

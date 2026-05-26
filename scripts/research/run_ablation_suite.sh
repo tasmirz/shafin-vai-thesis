@@ -41,9 +41,15 @@ full = metrics["aes-dscp"]
 assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
 assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
 assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
-assert dscp["avgPruneRatio"] > 0 and full["avgPruneRatio"] > 0, "DSCP did not prune fixture"
+assert dscp["avgPruneRatio"] == full["avgPruneRatio"], "AES changed DSCP candidate selection"
+assert dscp["totalBaselineEmissions"] == full["totalBaselineEmissions"], "AES changed DSCP baseline scope"
 assert dscp["falsePruneCount"] == 0 and full["falsePruneCount"] == 0, "DSCP false prune detected"
-print("ablationAssertions=passed emissionsAndFalsePruneChecks=true")
+assert all(
+    result.get("boundMode") == "partition-local-conservative-no-mbr"
+    and result.get("emissionScope") == "server-partition"
+    for result in metrics.values()
+), "run lacks paper-alignment mode evidence"
+print("ablationAssertions=passed emissionsAndFalsePruneChecks=true pruningMayRequireMbr=true")
 PY
 
 echo "== Controlled ablation comparison =="

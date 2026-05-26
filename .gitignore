@@ -65,6 +65,7 @@ Thumbs.db
 
 # Project specific
 datasets-raw/
+datasets-osm/
 reports/runs/*
 !reports/runs/.gitkeep
 reports/web-jobs/*

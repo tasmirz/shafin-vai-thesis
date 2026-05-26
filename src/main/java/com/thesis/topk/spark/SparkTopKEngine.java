@@ -14,8 +14,11 @@ import com.thesis.topk.model.RawEvent;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.spark.HashPartitioner;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -28,10 +31,12 @@ import scala.Tuple2;
  * Spark RDD implementation of the paper-inspired probabilistic top-k dominance pipeline.
  *
  * <p>The engine keeps the algorithmic shape of the 2025 ICCIT PTD framework: missing raw
- * events are expanded into probabilistic instances, object-level lower/upper bounds are computed
- * as distributed candidate records, and only surviving object groups are refined exactly.
+ * events are expanded into probabilistic instances, objects are assigned to server partitions,
+ * conservative partition-local lower/upper bounds are computed without performing global exact
+ * refinement, and only surviving object groups are refined exactly.
  * Explicit treatments select whether DSCP filtering and AES-style emission accounting are active
- * so one pipeline can execute the paper control and its three ablation variants.</p>
+ * so one pipeline can execute the paper control and its three ablation variants. MBR/aR-tree
+ * bounds are intentionally left to the paper-shaped spatial dataset adapter.</p>
  */
 public final class SparkTopKEngine {
   private SparkTopKEngine() {
@@ -117,37 +122,44 @@ public final class SparkTopKEngine {
     List<ProbabilisticInstance> allForQuery = queryInstances.collect();
     Broadcast<List<ProbabilisticInstance>> allBroadcast = sc.broadcast(allForQuery);
 
-    JavaPairRDD<String, Iterable<ProbabilisticInstance>> groupedByObject = queryInstances
-        .mapToPair(instance -> new Tuple2<>(instance.objectId(), instance))
+    JavaPairRDD<Integer, Iterable<ProbabilisticInstance>> groupedByPartition = queryInstances
+        .mapToPair(instance -> new Tuple2<>(serverPartition(instance.objectId(), partitions), instance))
         .groupByKey(partitions)
         .persist(StorageLevel.MEMORY_ONLY());
 
-    JavaRDD<CandidateEnvelope> roughCandidates = groupedByObject
-        .map(tuple -> toEnvelope(tuple._1(), queryPoint, iterableToList(tuple._2()), allBroadcast.value()))
+    JavaRDD<CandidateEnvelope> roughCandidates = groupedByPartition
+        .flatMap(tuple -> partitionEnvelopes(
+            tuple._1(), queryPoint, iterableToList(tuple._2()), allBroadcast.value(), partitions).iterator())
         .persist(StorageLevel.MEMORY_ONLY());
 
     long objectCount = roughCandidates.count();
     double tau = Double.NaN;
-    Broadcast<Double> thresholdBroadcast = null;
+    Broadcast<Map<Integer, Double>> thresholdBroadcast = null;
     JavaRDD<CandidateEnvelope> survivors = roughCandidates;
     if (algorithm.dscpEnabled()) {
-      List<Double> lowerBounds = roughCandidates.map(CandidateEnvelope::lowerBound).collect();
-      tau = kthLowerBound(lowerBounds, k);
-      thresholdBroadcast = sc.broadcast(tau);
-      Broadcast<Double> threshold = thresholdBroadcast;
-      survivors = roughCandidates.filter(candidate -> candidate.upperBound() >= threshold.value());
+      Map<Integer, Double> thresholds = roughCandidates
+          .mapToPair(candidate -> new Tuple2<>(candidate.partitionId(), candidate.lowerBound()))
+          .groupByKey(partitions)
+          .mapValues(values -> kthLowerBound(iterableToList(values), k))
+          .collectAsMap();
+      tau = thresholds.values().stream().mapToDouble(Double::doubleValue).min().orElse(Double.NaN);
+      thresholdBroadcast = sc.broadcast(new HashMap<>(thresholds));
+      Broadcast<Map<Integer, Double>> thresholdsBroadcast = thresholdBroadcast;
+      survivors = roughCandidates.filter(
+          candidate -> candidate.upperBound() >= thresholdsBroadcast.value().get(candidate.partitionId()));
     }
     survivors = survivors.persist(StorageLevel.MEMORY_ONLY());
 
     long refinedCount = survivors.count();
-    long survivorInstances = survivors.map(candidate -> (long) candidate.instances().size())
+    long baselineEmissions = survivors
+        .map(candidate -> (long) candidate.instances().size() * candidate.competitorIds().size())
         .fold(0L, Long::sum);
-    long baselineEmissions = survivorInstances * Math.max(0L, objectCount - 1L);
-    long aesEmissions = survivorInstances;
-    List<String> objectIds = roughCandidates.map(CandidateEnvelope::objectId).collect();
-    Broadcast<List<String>> objectIdsBroadcast = sc.broadcast(objectIds);
+    long aesEmissions = survivors
+        .filter(candidate -> !candidate.competitorIds().isEmpty())
+        .map(candidate -> (long) candidate.instances().size())
+        .fold(0L, Long::sum);
     JavaPairRDD<String, String> emissions = survivors
-        .flatMapToPair(candidate -> emitRecords(candidate, objectIdsBroadcast.value(), algorithm).iterator())
+        .flatMapToPair(candidate -> emitRecords(candidate, algorithm).iterator())
         .partitionBy(new HashPartitioner(partitions))
         .persist(StorageLevel.MEMORY_ONLY());
     long emittedRecords = emissions.count();
@@ -190,13 +202,12 @@ public final class SparkTopKEngine {
     emissions.unpersist();
     survivors.unpersist();
     roughCandidates.unpersist();
-    groupedByObject.unpersist();
+    groupedByPartition.unpersist();
     queryInstances.unpersist();
     if (thresholdBroadcast != null) {
       thresholdBroadcast.destroy();
     }
     allBroadcast.destroy();
-    objectIdsBroadcast.destroy();
 
     return new QueryRanking(
         queryPoint.queryId(),
@@ -217,19 +228,39 @@ public final class SparkTopKEngine {
         validationNanos);
   }
 
-  private static CandidateEnvelope toEnvelope(
-      String objectId,
+  private static List<CandidateEnvelope> partitionEnvelopes(
+      int partitionId,
       QueryPoint queryPoint,
-      List<ProbabilisticInstance> objectInstances,
-      List<ProbabilisticInstance> allInstances) {
-    double exact = DominanceScorer.expectedDominanceScore(objectInstances, allInstances, queryPoint);
-    double lowerBound = Math.max(0.0, exact - bestProbability(objectInstances));
-    double upperBound = DominanceScorer.closenessUpperBound(objectInstances, allInstances, queryPoint);
-    return new CandidateEnvelope(objectId, objectInstances, lowerBound, upperBound);
-  }
+      List<ProbabilisticInstance> localInstances,
+      List<ProbabilisticInstance> allInstances,
+      int partitions) {
+    Map<String, List<ProbabilisticInstance>> localObjects = localInstances.stream()
+        .collect(Collectors.groupingBy(
+            ProbabilisticInstance::objectId, LinkedHashMap::new, Collectors.toList()));
+    List<String> localIds = new ArrayList<>(localObjects.keySet());
+    List<CandidateEnvelope> envelopes = new ArrayList<>();
+    for (Map.Entry<String, List<ProbabilisticInstance>> entry : localObjects.entrySet()) {
+      String objectId = entry.getKey();
+      List<ProbabilisticInstance> objectInstances = entry.getValue();
+      List<String> competitors = localIds.stream().filter(id -> !id.equals(objectId)).toList();
 
-  private static double bestProbability(List<ProbabilisticInstance> instances) {
-    return instances.stream().mapToDouble(ProbabilisticInstance::probability).max().orElse(0.0);
+      // Local exact domination mass is a lower bound on the global score. Until MBR/aR-tree
+      // summaries are connected, all remote mass is retained as a conservative upper allowance.
+      double lowerBound = DominanceScorer.expectedDominanceScore(
+          objectInstances, localInstances, queryPoint);
+      double objectMass = objectInstances.stream()
+          .mapToDouble(ProbabilisticInstance::probability)
+          .sum();
+      double remoteMass = allInstances.stream()
+          .filter(other -> !other.objectId().equals(objectId))
+          .filter(other -> serverPartition(other.objectId(), partitions) != partitionId)
+          .mapToDouble(ProbabilisticInstance::probability)
+          .sum();
+      double upperBound = lowerBound + objectMass * remoteMass;
+      envelopes.add(new CandidateEnvelope(
+          partitionId, objectId, objectInstances, competitors, lowerBound, upperBound));
+    }
+    return envelopes;
   }
 
   private static double kthLowerBound(List<Double> lowerBounds, int k) {
@@ -240,28 +271,32 @@ public final class SparkTopKEngine {
         .orElse(Double.NEGATIVE_INFINITY);
   }
 
-  private static List<ProbabilisticInstance> iterableToList(Iterable<ProbabilisticInstance> iterable) {
-    List<ProbabilisticInstance> values = new ArrayList<>();
+  private static <T> List<T> iterableToList(Iterable<T> iterable) {
+    List<T> values = new ArrayList<>();
     iterable.forEach(values::add);
     return values;
   }
 
+  private static int serverPartition(String objectId, int partitions) {
+    return Math.floorMod(objectId.hashCode(), partitions);
+  }
+
   private static List<Tuple2<String, String>> emitRecords(
       CandidateEnvelope candidate,
-      List<String> objectIds,
       PtdAlgorithm algorithm) {
-    List<String> competitors = objectIds.stream()
-        .filter(id -> !id.equals(candidate.objectId()))
-        .toList();
     List<Tuple2<String, String>> records = new ArrayList<>();
+    if (candidate.competitorIds().isEmpty()) {
+      return records;
+    }
     for (ProbabilisticInstance instance : candidate.instances()) {
       if (algorithm.aesEnabled()) {
         records.add(new Tuple2<>(
-            candidate.objectId(),
-            instance.objectId() + "|" + String.join(";", competitors)));
+            Integer.toString(candidate.partitionId()),
+            instance.instanceId() + "|" + String.join(";", candidate.competitorIds())));
       } else {
-        for (String competitor : competitors) {
-          records.add(new Tuple2<>(candidate.objectId(), instance.objectId() + "|" + competitor));
+        for (String competitor : candidate.competitorIds()) {
+          records.add(new Tuple2<>(
+              Integer.toString(candidate.partitionId()), instance.instanceId() + "|" + competitor));
         }
       }
     }
@@ -269,24 +304,32 @@ public final class SparkTopKEngine {
   }
 
   private static final class CandidateEnvelope implements Serializable {
+    private final int partitionId;
     private final String objectId;
     private final List<ProbabilisticInstance> instances;
+    private final List<String> competitorIds;
     private final double lowerBound;
     private final double upperBound;
 
     CandidateEnvelope(
+        int partitionId,
         String objectId,
         List<ProbabilisticInstance> instances,
+        List<String> competitorIds,
         double lowerBound,
         double upperBound) {
+      this.partitionId = partitionId;
       this.objectId = objectId;
       this.instances = instances;
+      this.competitorIds = competitorIds;
       this.lowerBound = lowerBound;
       this.upperBound = upperBound;
     }
 
+    int partitionId() { return partitionId; }
     String objectId() { return objectId; }
     List<ProbabilisticInstance> instances() { return instances; }
+    List<String> competitorIds() { return competitorIds; }
     double lowerBound() { return lowerBound; }
     double upperBound() { return upperBound; }
   }

@@ -115,7 +115,8 @@ public final class ProbabilisticTopKSparkJob {
     long algorithmElapsedMs = Math.max(0L, elapsed.toMillis() - validationMs);
     System.out.printf(
         "engine=apache-spark source=%s dataset=%s k=%d partitions=%d elapsedMs=%d "
-            + "algorithmElapsedMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s%n",
+            + "algorithmElapsedMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s "
+            + "boundMode=partition-local-conservative-no-mbr emissionScope=server-partition%n",
         source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, validationMs,
         algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled());
     System.out.printf("rawEvents=%d probabilisticInstances=%d synopsisRules=%d synopsisBins=%d%n",

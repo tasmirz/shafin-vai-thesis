@@ -74,6 +74,7 @@
 - [x] Add launch forms for deterministic CSV and finite MQTT/Kafka/Spark validation profiles.
 - [x] Add exact-validation status, measured runtime/pruning analytics, log drill-down, and bundle export.
 - [ ] Add full synthetic smartphone and Bangladesh road/OSM dataset simulator screens.
+- [ ] Surface the tracked Bangladesh OSM source-readiness manifest and road-to-MBR curation status in the website.
 - [ ] Add probability normalization audit after paper-style uncertain-instance datasets are available.
 - [ ] Add experiment-matrix, ablation and academic LaTeX report generation screens.
 - [ ] Add detailed MQTT/Kafka/Spark telemetry for traces, actual shuffle bytes and partition skew.
@@ -82,5 +83,9 @@
 
 - [x] Implement selectable `baseline`, `AES-only`, `DSCP-only`, and `AES+DSCP` Spark variants for ablation.
 - [x] Persist selected treatment, executed emission counts, AER, and DSCP false-prune audit in saved runs.
+- [x] Remove global exact-score-derived filtering bounds; execute conservative partition-local bounds and same-partition emissions.
+- [x] Add a validated Bangladesh OSM source protocol and CLI readiness check without committing raw geospatial inputs.
 - [ ] Measure actual Spark shuffle records/bytes and phase timing rather than only payload proxies.
-- [ ] Add paper-shaped smartphone uncertain-instance/probability data and Bangladesh OSM-road generation.
+- [ ] Curate Bangladesh OSM line segments into projected MBRs with 5-11 normalized instances and a partition-index manifest.
+- [ ] Add paper-shaped smartphone uncertain-instance/probability data and Spark provider for curated uncertain-object rows.
+- [ ] Evaluate dynamic load balancing and worker-utilization/skew metrics inspired by `papers/3700838.3700859.pdf` after PTD spatial semantics are established.

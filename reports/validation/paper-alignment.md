@@ -20,10 +20,44 @@ This repository implements that upgrade direction by using Apache Spark as the d
 |---|---|
 | uncertain objects and probabilistic instances | raw events repaired into `ProbabilisticInstance` objects |
 | DDR-style query-relative dominance | `DominanceScorer` and query-aware ranking |
-| LB/UB candidate bounds | Spark object-group candidate envelopes |
-| DSCP pruning | kth lower-bound threshold, pruning objects with weak upper bounds |
-| AES compact emissions | object-level grouped Spark shuffle instead of instance-competitor emissions |
+| object-to-server distribution | stable object-level partition assignment in Spark treatment runs |
+| LB/UB candidate bounds | partition-local domination lower bound plus conservative remote-mass upper allowance; no global exact score in filtering |
+| DSCP pruning | per-partition k-th lower-bound threshold, pruning only when `UB < tau` |
+| AES compact emissions | one same-partition competitor-set record per surviving instance; control emits expanded instance/competitor records |
 | exact refinement | surviving candidate groups are rescored exactly |
+
+The current bound mode is deliberately reported as `partition-local-conservative-no-mbr`.
+It corrects a prior prototype issue in which filtering used a globally exact score, but it is
+not a substitute for the MBR/aR-tree summaries required to reproduce the source papers.
+
+## Baseline And Upgrade Match Gate
+
+| Required experimental element | Evidence in the local papers | Current state |
+|---|---|---|
+| Random object-level assignment to `N` server partitions | Rai and Lian (2023), real/synthetic setup | Implemented in Spark treatment computation with stable reproducible hashing; random seeded assignment remains required for curated data |
+| One spatial index/summary over each server partition | Rai and Lian (2023), offline preprocessing | Pending curated MBR dataset and spatial adapter |
+| Real road uncertainty regions represented as MBRs | Baseline uses 98,451 California road MBRs; upgrade uses Bangladesh road segments | Source ready only; conversion pending |
+| Uniform samples with normalized probabilities | Both paper dataset descriptions | Pending curation |
+| Uniform/Gaussian/Zipf synthetic distributions and `lmax` | Rai and Lian (2023) | Pending paper-shaped generator |
+| Baseline, AES-only, DSCP-only, AES+DSCP | ICCIT upgrade ablation | Implemented treatment selection and saved comparisons |
+| Filtering not performing final global scoring | Two-phase framework in both papers | Corrected: global exact scoring occurs only during refinement/oracle validation |
+| Per-partition DSCP/AES execution | ICCIT Algorithm 1 | Implemented for current treatment records; MBR-tight bounds pending |
+
+## Bangladesh Source Preparation
+
+The supplied HOTOSM/OpenStreetMap GeoPackage contains `494,717` `LINESTRING` features from a
+recorded `2026-05-10` snapshot, exceeding the baseline paper's `98,451` road-MBR scale. The
+tracked protocol is `config/research/bangladesh-osm-replication.json`; the non-destructive
+command `just osm-prepare-check` verifies provenance and configuration readiness. Raw geometry
+curation, projected MBR generation, normalized 5-11 instance sampling and index construction
+are intentionally still pending.
+
+## Supporting-Paper Adoption Boundary
+
+`papers/3700838.3700859.pdf` addresses distributed uncertain skyline enumeration rather than
+probabilistic top-k domination. Its dynamic load-balancing and worker-utilization evaluation
+are useful for a later Spark skew/partition benchmark, but its skyline scoring semantics are not
+substituted into the PTD algorithm in this preparation step.
 
 ## Runtime Validation Surface
 
@@ -93,8 +127,11 @@ configuration, logs, checksums where applicable, and exact-agreement evidence un
   aggregated competitor record per surviving instance. Saved runs record emitted records and AER.
 - DSCP treatments record thresholds, pruning ratios, and an oracle-backed `falsePrunes` audit.
 - These are Spark treatment implementations; paper-percentage reproduction still requires the
-  paper-shaped datasets and observed shuffle-byte/phase instrumentation.
+  paper-shaped datasets, MBR/index integration and observed shuffle-byte/phase instrumentation.
 
 Validation-enabled Spark runs emit `validationPerformed=true exactAgreement=true` only after an
 oracle comparison; the attached local benchmark also records `topKAgreement`. These checks
 support exactness for the tested finite inputs without claiming full paper reproduction.
+Under the index-free conservative bound mode, DSCP is allowed to prune zero objects on a small
+fixture; tight pruning is evidence to obtain after MBR/index integration, not a condition to
+force with unsafe bounds.
