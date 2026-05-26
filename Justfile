@@ -20,6 +20,7 @@ candidate_multiplier := env_var_or_default("CANDIDATE_MULTIPLIER", "4")
 synopsis_bins := env_var_or_default("SYNOPSIS_BINS", "8")
 max_events := env_var_or_default("MAX_EVENTS", "0")
 run_id := env_var_or_default("RUN_ID", "")
+algorithm := env_var_or_default("ALGORITHM", "aes-dscp")
 
 # list available recipes
 default:
@@ -76,7 +77,7 @@ spark:
       --master "local[*]" \
       --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
       /opt/spark/app/topk-spark.jar \
-      --source=simulator --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*] \
+      --source=simulator --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --algorithm={{ algorithm }} --sparkMaster=local[*] \
       > "$report_path" && \
       tail -n 12 "$report_path"
 
@@ -91,11 +92,15 @@ bench:
 
 # run the deterministic CSV-to-Spark research integration profile and save its artifacts
 csv-test:
-    RUN_ID={{ run_id }} tests/integration/test_csv_spark.sh
+    RUN_ID={{ run_id }} ALGORITHM={{ algorithm }} tests/integration/test_csv_spark.sh
+
+# execute and compare all four paper ablation treatments on the deterministic CSV profile
+ablation-test:
+    SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_ablation_suite.sh
 
 # run MQTT -> Kafka -> Spark Structured Streaming E2E and save its artifacts
 stream-test:
-    RUN_ID={{ run_id }} OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
+    RUN_ID={{ run_id }} ALGORITHM={{ algorithm }} OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
       PARTITIONS={{ partitions }} RATE_PER_SECOND={{ rate_per_second }} tests/e2e/test_mqtt_kafka_spark.sh
 
 # compare saved research runs: just compare-runs run-a run-b
@@ -136,7 +141,7 @@ run-kafka-local:
       --master "local[*]" \
       --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
       /opt/spark/app/topk-spark.jar \
-      --source=kafka --kafkaBootstrap=localhost:29092 --kafkaTopic=thesis.raw.incomplete --expectedMessages={{ expected_messages }} --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*]
+      --source=kafka --kafkaBootstrap=localhost:29092 --kafkaTopic=thesis.raw.incomplete --expectedMessages={{ expected_messages }} --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --algorithm={{ algorithm }} --sparkMaster=local[*]
 
 # start Kafka, EMQX, and the Spark standalone cluster
 setup: image
@@ -160,6 +165,7 @@ e2e:
     MAX_EVENTS={{ max_events }} \
     PARTITIONS={{ partitions }} \
     SYNOPSIS_BINS={{ synopsis_bins }} \
+    ALGORITHM={{ algorithm }} \
     scripts/e2e-benchmark.sh
 
 # run E2E without rebuilding the image in setup-services
@@ -176,6 +182,7 @@ e2e-fast:
     MAX_EVENTS={{ max_events }} \
     PARTITIONS={{ partitions }} \
     SYNOPSIS_BINS={{ synopsis_bins }} \
+    ALGORITHM={{ algorithm }} \
     BUILD_IMAGE=0 \
     scripts/e2e-benchmark.sh
 
@@ -190,7 +197,7 @@ spark-submit:
       --source=kafka --kafkaBootstrap=kafka:9092 --kafkaTopic=thesis.raw.incomplete \
       --expectedMessages={{ expected_messages }} --dataset={{ dataset }} --datasetPath={{ dataset_path }} \
       --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} \
-      --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} \
+      --missingRate={{ missing_rate }} --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --algorithm={{ algorithm }} \
       --sparkMaster=spark://spark-master:7077
 
 # validate monitor metrics from the CLI

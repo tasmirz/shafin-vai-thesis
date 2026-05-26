@@ -1,6 +1,8 @@
 package com.thesis.topk.spark;
 
 import com.thesis.topk.algorithm.DdImputationSynopsis;
+import com.thesis.topk.algorithm.variant.PtdAlgorithm;
+import com.thesis.topk.algorithm.variant.PtdAlgorithmRegistry;
 import com.thesis.topk.dataset.DatasetProvider;
 import com.thesis.topk.dataset.DatasetProviders;
 import com.thesis.topk.dataset.DatasetRouting;
@@ -31,6 +33,8 @@ public final class ProbabilisticTopKSparkJob {
     String source = parsed.stringValue("source", "simulator");
     String sparkMaster = parsed.stringValue("sparkMaster", "local[*]");
     boolean validateExact = parsed.booleanValue("validateExact", false);
+    PtdAlgorithm algorithm = PtdAlgorithmRegistry.require(
+        parsed.stringValue("algorithm", PtdAlgorithmRegistry.DEFAULT_ID));
 
     SparkConf conf = new SparkConf()
         .setAppName("probabilistic-topk-spark")
@@ -51,8 +55,10 @@ public final class ProbabilisticTopKSparkJob {
           synopsis,
           k,
           partitions,
+          algorithm,
           validateExact);
-      printReport(dataset, source, k, partitions, synopsis, result, Duration.between(start, Instant.now()));
+      printReport(dataset, source, k, partitions, algorithm, synopsis, result,
+          Duration.between(start, Instant.now()));
     }
   }
 
@@ -101,6 +107,7 @@ public final class ProbabilisticTopKSparkJob {
       String source,
       int k,
       int partitions,
+      PtdAlgorithm algorithm,
       DdImputationSynopsis synopsis,
       SparkTopKEngine.SparkRunResult result,
       Duration elapsed) {
@@ -108,8 +115,9 @@ public final class ProbabilisticTopKSparkJob {
     long algorithmElapsedMs = Math.max(0L, elapsed.toMillis() - validationMs);
     System.out.printf(
         "engine=apache-spark source=%s dataset=%s k=%d partitions=%d elapsedMs=%d "
-            + "algorithmElapsedMs=%d validationMs=%d%n",
-        source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, validationMs);
+            + "algorithmElapsedMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s%n",
+        source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, validationMs,
+        algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled());
     System.out.printf("rawEvents=%d probabilisticInstances=%d synopsisRules=%d synopsisBins=%d%n",
         result.rawEventCount(),
         result.probabilisticInstanceCount(),
@@ -118,25 +126,40 @@ public final class ProbabilisticTopKSparkJob {
 
     for (SparkTopKEngine.QueryRanking ranking : result.rankings()) {
       System.out.printf(
-          "TopKResult{engine=apache-spark, queryId=%s, objects=%d, refined=%d, pruned=%d, pruneRatio=%.4f, tau=%.6f, compactShuffleRecords=%d, validationPerformed=%s, exactAgreement=%s}%n",
+          "TopKResult{engine=apache-spark, algorithm=%s, queryId=%s, objects=%d, refined=%d, "
+              + "pruned=%d, pruneRatio=%.4f, tau=%.6f, emittedRecords=%d, "
+              + "baselineEmissions=%d, aesEmissions=%d, AER=%.6f, falsePrunes=%d, "
+              + "validationPerformed=%s, exactAgreement=%s}%n",
+          ranking.algorithmId(),
           ranking.queryId(),
           ranking.objectCount(),
           ranking.refinedCount(),
           ranking.prunedCount(),
           ranking.pruneRatio(),
           ranking.pruningThreshold(),
-          ranking.compactShuffleRecords(),
+          ranking.emittedRecords(),
+          ranking.baselineEmissions(),
+          ranking.aesEmissions(),
+          ranking.aggregatedEmissionRate(),
+          ranking.falsePruneCount(),
           ranking.validationPerformed(),
           ranking.exactAgreement());
       System.out.printf(
-          "query=%s objects=%d refined=%d pruned=%d pruneRatio=%.4f tau=%.6f compactShuffleRecords=%d validationPerformed=%s exactAgreement=%s%n",
+          "query=%s algorithm=%s objects=%d refined=%d pruned=%d pruneRatio=%.4f tau=%.6f "
+              + "emittedRecords=%d baselineEmissions=%d aesEmissions=%d AER=%.6f "
+              + "falsePrunes=%d validationPerformed=%s exactAgreement=%s%n",
           ranking.queryId(),
+          ranking.algorithmId(),
           ranking.objectCount(),
           ranking.refinedCount(),
           ranking.prunedCount(),
           ranking.pruneRatio(),
           ranking.pruningThreshold(),
-          ranking.compactShuffleRecords(),
+          ranking.emittedRecords(),
+          ranking.baselineEmissions(),
+          ranking.aesEmissions(),
+          ranking.aggregatedEmissionRate(),
+          ranking.falsePruneCount(),
           ranking.validationPerformed(),
           ranking.exactAgreement());
       for (CandidateScore score : ranking.topK()) {

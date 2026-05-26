@@ -74,6 +74,9 @@ python3 -m json.tool /tmp/thesis-simulator-image-check.json >/dev/null
 echo "== CSV-to-Spark research integration profile =="
 RUN_ID="csv-test-all-$(date -u +%Y%m%dT%H%M%SZ)-$$" BUILD_IMAGE=0 tests/integration/test_csv_spark.sh
 
+echo "== Four-treatment Spark ablation validation profile =="
+SUITE_ID="ablation-test-all-$(date -u +%Y%m%dT%H%M%SZ)-$$" BUILD_IMAGE=0 tests/integration/test_csv_ablation.sh
+
 echo "== PTD-BenchLab website HTTP smoke test =="
 just web-smoke-test
 

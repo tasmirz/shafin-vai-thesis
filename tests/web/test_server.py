@@ -23,6 +23,7 @@ def write_run(root, run_id, partitions=2, elapsed=100, exact=True):
       "spark": {
           "source": "simulator",
           "dataset": "csv",
+          "algorithm": "aes-dscp",
           "k": 2,
           "partitions": partitions,
           "algorithmElapsedMs": elapsed,
@@ -114,6 +115,13 @@ class ResearchApiTest(unittest.TestCase):
       self.assertEqual(
           str(job_root / job["jobId"] / "e2e"),
           captured["env"]["E2E_REPORT_DIR"])
+      self.assertEqual("aes-dscp", captured["env"]["ALGORITHM"])
+
+  def test_launch_rejects_unknown_algorithm(self):
+    with tempfile.TemporaryDirectory() as folder:
+      with patch.object(server, "RUN_ROOT", Path(folder)):
+        with self.assertRaisesRegex(ValueError, "algorithm must be one of"):
+          server.launch_job({"mode": "csv", "runId": "bad-algorithm", "algorithm": "unknown"})
 
 
 if __name__ == "__main__":

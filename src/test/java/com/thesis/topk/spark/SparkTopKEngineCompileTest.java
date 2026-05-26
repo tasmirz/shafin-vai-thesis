@@ -12,5 +12,7 @@ class SparkTopKEngineCompileTest {
     assertThat(ranking.pruneRatio()).isEqualTo(0.3);
     assertThat(ranking.validationPerformed()).isTrue();
     assertThat(ranking.exactAgreement()).isTrue();
+    assertThat(ranking.algorithmId()).isEqualTo("aes-dscp");
+    assertThat(ranking.aggregatedEmissionRate()).isEqualTo(1.0);
   }
 }

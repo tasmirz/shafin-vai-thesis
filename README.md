@@ -9,7 +9,9 @@ Raw uncertain events
   -> Spark parallel imputation into probabilistic instances
   -> query/object grouping
   -> distributed LB/UB candidate-bound computation
-  -> DSCP-style kth-LB threshold pruning
+  -> selectable treatment: baseline | DSCP-only | AES-only | AES + DSCP
+  -> optional DSCP-style kth-LB threshold pruning
+  -> expanded or AES-aggregated Spark emission/shuffle stage
   -> exact Spark refinement for surviving object groups
   -> TopKResult per query
 ```
@@ -35,6 +37,7 @@ just
 just test
 just spark
 just csv-test
+just ablation-test
 just stream-test
 just compare-runs csv-run-a csv-run-b
 just web
@@ -60,7 +63,7 @@ Run the Spark entry point directly:
 ```bash
 mvn -q -DskipTests compile exec:java \
   -Dexec.mainClass=com.thesis.topk.spark.ProbabilisticTopKSparkJob \
-  -Dexec.args="--source=simulator --dataset=synthetic --objects=1000 --queries=2 --dimensions=4 --k=10 --partitions=4 --sparkMaster=local[*]"
+  -Dexec.args="--source=simulator --dataset=synthetic --objects=1000 --queries=2 --dimensions=4 --k=10 --partitions=4 --algorithm=aes-dscp --sparkMaster=local[*]"
 ```
 
 ## Docker Compose
@@ -170,6 +173,16 @@ Run the deterministic CSV fixture through Spark and exactness validation:
 RUN_ID=csv-baseline just csv-test
 ```
 
+Run the controlled four-treatment ablation on one deterministic input setup:
+
+```bash
+RUN_ID=paper-ablation BUILD_IMAGE=0 just ablation-test
+```
+
+Selectable algorithm IDs are `baseline`, `dscp-only`, `aes-only`, and `aes-dscp`.
+Each saved query records the executed emitted-record count, baseline/AES emission counts,
+`AER`, pruning ratio, and the exact-oracle `falsePrunes` audit.
+
 The fixture is `tests/fixtures/csv/smartphone-small.csv`. To exercise another normalized CSV:
 
 ```bash
@@ -215,9 +228,9 @@ The dependency-free website is backed directly by the saved experiment evidence 
 - launch controls for the validated CSV and bounded streaming benchmark profiles;
 - exactness status, measured runtime/pruning charts, and downloadable evidence bundles.
 
-The site explicitly marks paper-faithful AES-only/DSCP-only ablations, spatial road
-simulation, per-object DDR/MBR traces and actual Spark shuffle-byte metrics as pending
-instrumentation; it does not present those claims from placeholder data.
+The site can launch all four treatment variants and compare their saved AER/pruning evidence.
+Spatial road simulation, per-object DDR/MBR traces and actual Spark shuffle-byte metrics remain
+pending instrumentation; it does not present those claims from placeholder data.
 
 Validate both its artifact logic and its served HTTP endpoints from the terminal:
 
@@ -231,7 +244,7 @@ Every profile produces an immutable run directory under `reports/runs/<run-id>/`
 ```text
 manifest.json       configuration, dataset SHA-256, commit and dirty-worktree state
 metrics.json        Spark/PTD metrics, algorithm time, validation time, correctness status
-metrics.csv         query-level export for later analysis
+metrics.csv         query-level variant, emission, AER, pruning and validation export
 spark.log           execution evidence
 algorithm.log       CSV profile exact-vs-pruned validation evidence
 e2e-summary.csv     stream profile ingress and elapsed-time evidence

@@ -49,16 +49,17 @@ def main():
     if len(set(values)) > 1:
       differences.append(f"{field}: " + ", ".join(str(item) for item in values))
 
-  print("| run | mode | source | dataset | algorithm ms | validation ms | avg prune ratio | exact agreement |")
-  print("| --- | --- | --- | --- | ---: | ---: | ---: | --- |")
+  print("| run | variant | mode | source | dataset | algorithm ms | avg prune ratio | AER | emissions | false prunes | exact |")
+  print("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |")
   for _, manifest, metrics in loaded:
     spark = metrics["spark"]
     validation = metrics["validation"]
     prune = spark["avgPruneRatio"]
     print(
-        f"| {manifest['runId']} | {manifest['mode']} | {spark['source']} | "
-        f"{spark['dataset']} | {spark.get('algorithmElapsedMs')} | {spark.get('validationMs')} | "
-        f"{prune:.4f} | {validation['exactTopKAgreement']} |")
+        f"| {manifest['runId']} | {spark.get('algorithm')} | {manifest['mode']} | {spark['source']} | "
+        f"{spark['dataset']} | {spark.get('algorithmElapsedMs')} | "
+        f"{prune:.4f} | {spark.get('avgAER')} | {spark.get('totalEmittedRecords')} | "
+        f"{spark.get('falsePruneCount')} | {validation['exactTopKAgreement']} |")
   if differences:
     print("\nComparison warning: fairness-critical configuration differs.")
     for difference in differences:

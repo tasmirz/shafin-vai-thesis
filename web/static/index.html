@@ -73,7 +73,7 @@
             <h3>Reported targets</h3>
             <div id="paper-targets"></div>
             <div class="callout warning">
-              Paper reproduction is not claimed until algorithm ablations and paper-shaped datasets are implemented.
+              Paper reproduction is not claimed until paper-shaped datasets and observed system-cost measurements are available.
             </div>
           </section>
         </div>
@@ -114,6 +114,14 @@
             <p class="subtle">Run a bounded CSV dataset through Spark and the exact oracle.</p>
             <label>Run ID<input name="runId" required value="csv-web-run"></label>
             <label>CSV path<input name="csvPath" value="tests/fixtures/csv/smartphone-small.csv"></label>
+            <label>Algorithm variant
+              <select name="algorithm">
+                <option value="baseline">Baseline distributed PTD</option>
+                <option value="dscp-only">DSCP-only</option>
+                <option value="aes-only">AES-only</option>
+                <option value="aes-dscp" selected>AES + DSCP</option>
+              </select>
+            </label>
             <div class="field-pair">
               <label>k<input type="number" min="1" name="k" value="2"></label>
               <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
@@ -131,6 +139,14 @@
             <h3>Streaming validation setup</h3>
             <p class="subtle">Publish a finite workload and consume it using Spark Structured Streaming.</p>
             <label>Run ID<input name="runId" required value="stream-web-run"></label>
+            <label>Algorithm variant
+              <select name="algorithm">
+                <option value="baseline">Baseline distributed PTD</option>
+                <option value="dscp-only">DSCP-only</option>
+                <option value="aes-only">AES-only</option>
+                <option value="aes-dscp" selected>AES + DSCP</option>
+              </select>
+            </label>
             <div class="field-pair">
               <label>Objects<input type="number" min="1" name="objects" value="12"></label>
               <label>Queries<input type="number" min="1" name="queries" value="2"></label>
@@ -226,8 +242,8 @@
             <div class="gate passed">Exact top-k agreement<span>Captured for implemented test profiles</span></div>
             <div class="gate passed">Immutable run evidence<span>Manifests, metrics and logs</span></div>
             <div class="gate pending">Probability normalization<span>Pending paper-style uncertain-object dataset</span></div>
-            <div class="gate pending">AES losslessness<span>Pending explicit AES variant records</span></div>
-            <div class="gate pending">DSCP false-prune audit<span>Pending per-object bound trace</span></div>
+            <div class="gate passed">AES emission comparison<span>Expanded versus aggregated executed records</span></div>
+            <div class="gate passed">DSCP false-prune audit<span>Checked against exact top-k for validated runs</span></div>
             <div class="gate pending">MBR consistency<span>Pending spatial dataset mode</span></div>
           </div>
         </section>

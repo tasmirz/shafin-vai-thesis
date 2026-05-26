@@ -68,6 +68,15 @@ host Java version:
 RUN_ID=csv-baseline just csv-test
 ```
 
+Run all controlled algorithm treatments over the same CSV fixture:
+
+```bash
+RUN_ID=csv-ablation BUILD_IMAGE=0 just ablation-test
+```
+
+For one selected treatment, set `ALGORITHM=baseline`, `ALGORITHM=dscp-only`,
+`ALGORITHM=aes-only`, or `ALGORITHM=aes-dscp`.
+
 The streaming profile retains the complete MQTT -> Kafka -> Spark route and uses Spark
 Structured Streaming to drain the finite test snapshot:
 

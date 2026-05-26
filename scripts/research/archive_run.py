@@ -52,22 +52,25 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
   engine_match = re.search(r"^engine=apache-spark (.+)$", spark_log, re.MULTILINE)
   engine = dict(re.findall(r"(\w+)=([^\s]+)", engine_match.group(1))) if engine_match else {}
   count_match = re.search(r"^rawEvents=(\d+) probabilisticInstances=(\d+)", spark_log, re.MULTILINE)
-  rankings = [
-      {
-          "queryId": m.group(1),
-          "objects": int(m.group(2)),
-          "refined": int(m.group(3)),
-          "pruned": int(m.group(4)),
-          "pruneRatio": float(m.group(5)),
-          "tau": m.group(6),
-          "compactShuffleRecords": int(m.group(7)),
-      }
-      for m in re.finditer(
-          r"^query=(\S+) objects=(\d+) refined=(\d+) pruned=(\d+) "
-          r"pruneRatio=([0-9.]+) tau=(\S+) compactShuffleRecords=(\d+)",
-          spark_log,
-          re.MULTILINE)
-  ]
+  rankings = []
+  for line in re.findall(r"^query=.+$", spark_log, re.MULTILINE):
+    fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
+    emitted = fields.get("emittedRecords", fields.get("compactShuffleRecords", "0"))
+    rankings.append({
+        "queryId": fields["query"],
+        "algorithm": fields.get("algorithm", engine.get("algorithm")),
+        "objects": int(fields["objects"]),
+        "refined": int(fields["refined"]),
+        "pruned": int(fields["pruned"]),
+        "pruneRatio": float(fields["pruneRatio"]),
+        "tau": fields["tau"],
+        "emittedRecords": int(emitted),
+        "compactShuffleRecords": int(emitted),
+        "baselineEmissions": int(fields.get("baselineEmissions", emitted)),
+        "aesEmissions": int(fields.get("aesEmissions", emitted)),
+        "aer": float(fields.get("AER", "1.0")),
+        "falsePrunes": int(fields.get("falsePrunes", "0")),
+    })
   agreement = re.findall(r"topKAgreement=(true|false)", algorithm_log)
   spark_agreement = re.findall(
       r"^query=.*validationPerformed=true exactAgreement=(true|false)", spark_log, re.MULTILINE)
@@ -89,12 +92,20 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
           "algorithmElapsedMs": (
               int(engine["algorithmElapsedMs"]) if "algorithmElapsedMs" in engine else None),
           "validationMs": int(engine["validationMs"]) if "validationMs" in engine else None,
+          "algorithm": engine.get("algorithm"),
+          "dscpEnabled": engine.get("dscp") == "true" if "dscp" in engine else None,
+          "aesEnabled": engine.get("aes") == "true" if "aes" in engine else None,
           "rawEvents": int(count_match.group(1)) if count_match else None,
           "probabilisticInstances": int(count_match.group(2)) if count_match else None,
           "structuredStreamingKafka": "reader=structured-streaming" in spark_log,
           "queries": rankings,
           "avgPruneRatio": (
               sum(row["pruneRatio"] for row in rankings) / len(rankings) if rankings else None),
+          "totalEmittedRecords": sum(row["emittedRecords"] for row in rankings),
+          "totalBaselineEmissions": sum(row["baselineEmissions"] for row in rankings),
+          "totalAesEmissions": sum(row["aesEmissions"] for row in rankings),
+          "avgAER": sum(row["aer"] for row in rankings) / len(rankings) if rankings else None,
+          "falsePruneCount": sum(row["falsePrunes"] for row in rankings),
       },
       "validation": {
           "queriesChecked": len(all_agreement),
@@ -154,21 +165,26 @@ def main():
   query_rows = metrics["spark"]["queries"]
   with (run_dir / "metrics.csv").open("w", newline="") as target:
     writer = csv.DictWriter(target, fieldnames=[
-        "run_id", "mode", "query_id", "objects", "refined", "pruned", "prune_ratio",
-        "tau", "compact_shuffle_records", "algorithm_elapsed_ms", "validation_ms",
-        "exact_topk_agreement"])
+        "run_id", "mode", "algorithm", "query_id", "objects", "refined", "pruned",
+        "prune_ratio", "tau", "emitted_records", "baseline_emissions", "aes_emissions",
+        "aer", "false_prunes", "algorithm_elapsed_ms", "validation_ms", "exact_topk_agreement"])
     writer.writeheader()
     for ranking in query_rows:
       writer.writerow({
           "run_id": args.run_id,
           "mode": args.mode,
+          "algorithm": ranking["algorithm"],
           "query_id": ranking["queryId"],
           "objects": ranking["objects"],
           "refined": ranking["refined"],
           "pruned": ranking["pruned"],
           "prune_ratio": ranking["pruneRatio"],
           "tau": ranking["tau"],
-          "compact_shuffle_records": ranking["compactShuffleRecords"],
+          "emitted_records": ranking["emittedRecords"],
+          "baseline_emissions": ranking["baselineEmissions"],
+          "aes_emissions": ranking["aesEmissions"],
+          "aer": ranking["aer"],
+          "false_prunes": ranking["falsePrunes"],
           "algorithm_elapsed_ms": metrics["spark"]["algorithmElapsedMs"],
           "validation_ms": metrics["spark"]["validationMs"],
           "exact_topk_agreement": metrics["validation"]["exactTopKAgreement"],

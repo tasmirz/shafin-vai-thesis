@@ -80,6 +80,7 @@
 
 ## 11. Paper-Faithful Experimental Expansion
 
-- [ ] Implement selectable `baseline`, `AES-only`, `DSCP-only`, and `AES+DSCP` Spark variants for ablation.
+- [x] Implement selectable `baseline`, `AES-only`, `DSCP-only`, and `AES+DSCP` Spark variants for ablation.
+- [x] Persist selected treatment, executed emission counts, AER, and DSCP false-prune audit in saved runs.
 - [ ] Measure actual Spark shuffle records/bytes and phase timing rather than only payload proxies.
 - [ ] Add paper-shaped smartphone uncertain-instance/probability data and Bangladesh OSM-road generation.

@@ -13,19 +13,20 @@ const titles = {
 };
 
 const algorithms = [
-  { name: "Spark certified pruning", status: "Implemented", className: "teal", detail: "Distributed bounds, candidate pruning and exact refinement validated against the oracle.", runtime: "Apache Spark / exact validation" },
+  { name: "Spark PTD variant engine", status: "Implemented", className: "teal", detail: "Treatment registry, executed emission stages and exact refinement validated against the oracle.", runtime: "Apache Spark / exact validation" },
   { name: "Brute-force exact oracle", status: "Implemented", className: "teal", detail: "Correctness reference executed for finite CSV and streaming profiles.", runtime: "Local Java benchmark oracle" },
-  { name: "Baseline distributed PTD", status: "Pending", detail: "Required as the explicit no-AES/no-DSCP paper comparison variant.", runtime: "Paper reproduction work" },
-  { name: "DSCP-only", status: "Pending", detail: "Required to isolate pruning contribution and false-prune evidence.", runtime: "Paper reproduction work" },
-  { name: "AES-only", status: "Pending", detail: "Required to measure aggregated emission reduction independently.", runtime: "Paper reproduction work" },
-  { name: "AES + DSCP", status: "Pending", detail: "Required named full-method variant for faithful ablation reporting.", runtime: "Paper reproduction work" }
+  { name: "Baseline distributed PTD", status: "Implemented", className: "teal", detail: "Explicit no-AES/no-DSCP treatment and expanded instance-competitor emission stage.", runtime: "--algorithm=baseline" },
+  { name: "DSCP-only", status: "Implemented", className: "teal", detail: "Threshold pruning with expanded emissions and recorded false-prune evidence.", runtime: "--algorithm=dscp-only" },
+  { name: "AES-only", status: "Implemented", className: "teal", detail: "Aggregated emission stage without DSCP filtering.", runtime: "--algorithm=aes-only" },
+  { name: "AES + DSCP", status: "Implemented", className: "teal", detail: "Full named method with pruning and aggregated emissions.", runtime: "--algorithm=aes-dscp" }
 ];
 
 const stages = [
   { name: "Input data", label: "CSV or MQTT", detail: "A run consumes either normalized CSV records or simulator events published through MQTT and bridged into Kafka.", metrics: [["CSV rows", "Dataset inspector"], ["MQTT events", "E2E summary"], ["Data checksum", "Run manifest"]] },
   { name: "Kafka ingestion", label: "Structured Streaming", detail: "Finite stream runs use Spark Structured Streaming with an AvailableNow trigger so every saved benchmark ranks a fixed snapshot.", metrics: [["Reader", "AvailableNow"], ["Evidence", "structuredStreamingKafka"], ["Source", "Kafka"]] },
   { name: "Imputation", label: "Probabilistic instances", detail: "Incomplete values are repaired into probabilistic instances before query-relative ranking.", metrics: [["Raw events", "Recorded"], ["Probabilistic instances", "Recorded"], ["Probability normalization", "Pending paper dataset"]] },
-  { name: "Candidate filtering", label: "LB / UB pruning", detail: "The implemented Spark engine records candidates refined, candidates pruned, pruning ratio and the threshold tau per query.", metrics: [["Pruned objects", "Recorded"], ["Threshold tau", "Recorded"], ["Per-object trace", "Pending"]] },
+  { name: "Candidate filtering", label: "Optional DSCP", detail: "The registry enables DSCP only in its named treatments and records pruning ratio, tau and zero-false-prune validation per query.", metrics: [["Pruned objects", "Recorded"], ["Threshold tau", "Recorded"], ["False prunes", "Validated"]] },
+  { name: "Emission / shuffle", label: "Optional AES", detail: "Spark materializes either expanded instance-competitor emissions or aggregated instance records, allowing AER and emitted-record comparison.", metrics: [["Emitted records", "Executed"], ["AER", "Recorded"], ["Shuffle bytes", "Pending"]] },
   { name: "Refinement", label: "Exact top-k", detail: "Surviving candidate objects are exactly scored, then compared with the brute-force oracle when validation is enabled.", metrics: [["Algorithm elapsed", "Recorded"], ["Exact agreement", "Required"], ["Validation elapsed", "Excluded from algorithm time"]] },
   { name: "Artifact store", label: "Immutable evidence", detail: "Completed runs store parameters, Git identity, dataset checksum, metrics and logs. Comparison checks fairness-critical parameters.", metrics: [["Manifest", "Recorded"], ["Metrics CSV/JSON", "Recorded"], ["Bundle export", "Available"]] }
 ];
@@ -92,10 +93,11 @@ function runTable(runs, selection = false) {
   if (!runs.length) return '<div class="empty-state">No saved run artifacts have been generated yet.</div>';
   return `<div class="scroll-table"><table class="table"><thead><tr>
     ${selection ? "<th>Select</th>" : ""}
-    <th>Run ID</th><th>Input</th><th>Algorithm time</th><th>Pruned</th><th>Validation</th>
+    <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Pruned</th><th>Validation</th>
   </tr></thead><tbody>${runs.map(run => `<tr>
     ${selection ? `<td><input class="compare-check" type="checkbox" value="${escapeHtml(run.id)}"></td>` : ""}
     <td><button class="run-link" data-run="${escapeHtml(run.id)}">${escapeHtml(run.id)}</button></td>
+    <td>${escapeHtml(run.summary.algorithm || "legacy")}</td>
     <td>${escapeHtml(run.mode)}</td>
     <td>${formatMs(run.summary.algorithmElapsedMs)}</td>
     <td>${percent(run.summary.avgPruneRatio)}</td>
@@ -247,7 +249,7 @@ async function compareSelected() {
     const result = await api(`/api/compare?ids=${encodeURIComponent(ids.join(","))}`);
     const alert = result.fair ? "comparison-good" : "comparison-warning";
     document.getElementById("comparison-panel").innerHTML = `<div class="${alert}">${escapeHtml(result.notice)}</div>
-      ${runTable(result.runs.map(run => ({id: run.id, mode: run.source, summary: {algorithmElapsedMs: run.algorithmElapsedMs, avgPruneRatio: run.avgPruneRatio, exactAgreement: run.exactAgreement}})))}
+      ${runTable(result.runs.map(run => ({id: run.id, mode: run.source, summary: {algorithm: run.algorithm, algorithmElapsedMs: run.algorithmElapsedMs, avgPruneRatio: run.avgPruneRatio, exactAgreement: run.exactAgreement}})))}
       ${result.differences.map(diff => `<div class="diff"><strong>${escapeHtml(diff.label)}:</strong> ${diff.values.map(value => escapeHtml(value ?? "not recorded")).join(" versus ")}</div>`).join("")}`;
     bindRunLinks();
   } catch (error) {
@@ -262,16 +264,18 @@ async function showRun(runId) {
     document.getElementById("drawer-title").textContent = run.id;
     document.getElementById("drawer-content").innerHTML = `<div class="detail-stats">
       <div><label>Algorithm elapsed</label><strong>${formatMs(spark.algorithmElapsedMs)}</strong></div>
+      <div><label>Variant</label><strong>${escapeHtml(spark.algorithm || "legacy")}</strong></div>
       <div><label>Validation elapsed</label><strong>${formatMs(spark.validationMs)}</strong></div>
       <div><label>Raw events</label><strong>${spark.rawEvents ?? "n/a"}</strong></div>
       <div><label>Avg pruning</label><strong>${percent(spark.avgPruneRatio)}</strong></div>
+      <div><label>Avg AER</label><strong>${percent(spark.avgAER)}</strong></div>
     </div>
     <div class="detail-section"><h4>Recorded configuration</h4>
       ${Object.entries(run.manifest.parameters).map(([name, value]) => `<div class="metric-row"><span>${escapeHtml(name)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
     </div>
     <div class="detail-section"><h4>Query metrics</h4>
-      <table class="table"><thead><tr><th>Query</th><th>Pruned</th><th>tau</th><th>Records</th></tr></thead><tbody>
-      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${query.pruned} / ${query.objects}</td><td>${escapeHtml(query.tau)}</td><td>${query.compactShuffleRecords}</td></tr>`).join("")}
+      <table class="table"><thead><tr><th>Query</th><th>Pruned</th><th>tau</th><th>Emitted</th><th>AER</th><th>False prune</th></tr></thead><tbody>
+      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${query.pruned} / ${query.objects}</td><td>${escapeHtml(query.tau)}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${query.falsePrunes ?? 0}</td></tr>`).join("")}
       </tbody></table>
     </div>
     <div class="detail-section"><h4>Validation</h4><p class="callout ${run.summary.exactAgreement ? "info" : "warning"}">

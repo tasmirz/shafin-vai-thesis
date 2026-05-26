@@ -18,6 +18,7 @@ RATE_PER_SECOND="${RATE_PER_SECOND:-200}"
 QOS="${QOS:-0}"
 PARTITIONS="${PARTITIONS:-${PARALLELISM:-4}}"
 SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
+ALGORITHM="${ALGORITHM:-aes-dscp}"
 SEED="${SEED:-7}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
@@ -164,6 +165,7 @@ docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
   --missingRate="$MISSING_RATE" \
   --partitions="$PARTITIONS" \
   --synopsisBins="$SYNOPSIS_BINS" \
+  --algorithm="$ALGORITHM" \
   --maxEvents="$MAX_EVENTS" \
   --seed="$SEED" \
   --validateExact=true \
@@ -173,6 +175,10 @@ cp "$SPARK_SUBMIT_LOG" "$SPARK_LOG"
 
 topk_results="$(grep -c 'TopKResult{' "$SPARK_LOG" || true)"
 if grep -q "exactAgreement=false" "$SPARK_LOG"; then
+  cat "$SPARK_LOG" >&2
+  exit 1
+fi
+if grep -Eq "falsePrunes=[1-9][0-9]*" "$SPARK_LOG"; then
   cat "$SPARK_LOG" >&2
   exit 1
 fi
@@ -206,6 +212,7 @@ Config:
 - mqttQos: $QOS
 - sparkPartitions: $PARTITIONS
 - synopsisBins: $SYNOPSIS_BINS
+- algorithm: $ALGORITHM
 - expectedMessages: $EXPECTED_MESSAGES
 - kafkaMessages: $kafka_messages
 - topKResults: $topk_results
@@ -231,8 +238,8 @@ Artifacts:
 EOF_SUMMARY
 
 cat >"$CSV" <<EOF_CSV
-objects,queries,dimensions,k,missing_rate,mqtt_qos,spark_partitions,synopsis_bins,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,spark_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
-$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$PARTITIONS,$SYNOPSIS_BINS,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$spark_ms,$total_ms,$publish_rate,$end_to_end_rate,$DATASET,"$TOPIC_MAPPINGS"
+objects,queries,dimensions,k,missing_rate,mqtt_qos,spark_partitions,synopsis_bins,algorithm,expected_messages,kafka_messages,topk_results,publish_ms,ingress_ms,spark_ms,total_ms,publish_rate_msg_s,e2e_rate_msg_s,dataset,topic_mappings
+$OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$PARTITIONS,$SYNOPSIS_BINS,$ALGORITHM,$EXPECTED_MESSAGES,$kafka_messages,$topk_results,$publish_ms,$ingress_ms,$spark_ms,$total_ms,$publish_rate,$end_to_end_rate,$DATASET,"$TOPIC_MAPPINGS"
 EOF_CSV
 
 cat "$SUMMARY"
@@ -260,6 +267,7 @@ python3 scripts/research/archive_run.py \
   --e2e-summary "$CSV" \
   "${dataset_artifact[@]}" \
   --parameter "dataset=$DATASET" \
+  --parameter "algorithm=$ALGORITHM" \
   --parameter "objects=$OBJECTS" \
   --parameter "queries=$QUERIES" \
   --parameter "dimensions=$DIMENSIONS" \

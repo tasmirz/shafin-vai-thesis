@@ -8,6 +8,7 @@ K="${K:-2}"
 PARTITIONS="${PARTITIONS:-2}"
 SEED="${SEED:-42}"
 SYNOPSIS_BINS="${SYNOPSIS_BINS:-4}"
+ALGORITHM="${ALGORITHM:-aes-dscp}"
 BUILD_IMAGE="${BUILD_IMAGE:-1}"
 cleanup() {
   status=$?
@@ -43,6 +44,7 @@ docker run --rm \
   /opt/spark/app/topk-spark.jar \
   --source=simulator --dataset=csv --datasetPath=/opt/spark/input/events.csv \
   --k="$K" --partitions="$PARTITIONS" --seed="$SEED" --synopsisBins="$SYNOPSIS_BINS" \
+  --algorithm="$ALGORITHM" \
   --validateExact=true --sparkMaster="local[2]" >"$RUN_TMP/spark.log" 2>&1
 mvn -q -DskipTests compile exec:java \
   -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
@@ -52,6 +54,10 @@ mvn -q -DskipTests compile exec:java \
 grep -q "engine=apache-spark source=simulator dataset=csv" "$RUN_TMP/spark.log"
 grep -q "TopKResult{" "$RUN_TMP/spark.log"
 if grep -q "exactAgreement=false" "$RUN_TMP/spark.log"; then
+  cat "$RUN_TMP/spark.log" >&2
+  exit 1
+fi
+if grep -Eq "falsePrunes=[1-9][0-9]*" "$RUN_TMP/spark.log"; then
   cat "$RUN_TMP/spark.log" >&2
   exit 1
 fi
@@ -67,8 +73,9 @@ python3 scripts/research/archive_run.py \
   --algorithm-log "$RUN_TMP/algorithm.log" \
   --dataset-file "$CSV_PATH" \
   --parameter "dataset=csv" \
+  --parameter "algorithm=$ALGORITHM" \
   --parameter "k=$K" \
   --parameter "partitions=$PARTITIONS" \
   --parameter "seed=$SEED" \
   --parameter "synopsisBins=$SYNOPSIS_BINS"
-cat "$RUN_TMP/spark.log" | grep -E "^(engine=|rawEvents=|TopKResult\\{|query=)"
+grep -E "^(engine=|rawEvents=|TopKResult\\{|query=)" "$RUN_TMP/spark.log"

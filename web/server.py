@@ -32,6 +32,7 @@ RUN_ROOT = ROOT / "reports" / "runs"
 JOB_ROOT = ROOT / "reports" / "web-jobs"
 CSV_FIXTURE = ROOT / "tests" / "fixtures" / "csv" / "smartphone-small.csv"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+ALGORITHMS = ("baseline", "dscp-only", "aes-only", "aes-dscp")
 
 PAPER_TARGETS = [
     {
@@ -39,7 +40,7 @@ PAPER_TARGETS = [
         "baselineMs": 66520,
         "proposedMs": 43757,
         "reductionPct": 34.2,
-        "status": "Requires paper-shaped dataset and algorithm ablation variants",
+        "status": "Algorithm treatments implemented; requires paper-shaped smartphone dataset",
     },
     {
         "dataset": "Bangladesh road / OSM",
@@ -109,11 +110,15 @@ def load_run(run_id: str, include_logs: bool = False) -> dict:
           "dataset": spark.get("dataset"),
           "k": spark.get("k"),
           "partitions": spark.get("partitions"),
+          "algorithm": spark.get("algorithm"),
           "algorithmElapsedMs": spark.get("algorithmElapsedMs"),
           "validationMs": spark.get("validationMs"),
           "rawEvents": spark.get("rawEvents"),
           "queries": len(spark.get("queries", [])),
           "avgPruneRatio": spark.get("avgPruneRatio"),
+          "avgAER": spark.get("avgAER"),
+          "totalEmittedRecords": spark.get("totalEmittedRecords"),
+          "falsePruneCount": spark.get("falsePruneCount"),
           "exactAgreement": validation.get("exactTopKAgreement"),
           "streamingKafka": spark.get("structuredStreamingKafka"),
       },
@@ -243,7 +248,6 @@ def dashboard() -> dict:
     warnings.append("No saved runs are present. Launch a CSV or stream validation run.")
   if not any(item["mode"] == "stream" for item in runs):
     warnings.append("No saved MQTT/Kafka/Spark stream run is available.")
-  warnings.append("Paper ablation variants (baseline, AES-only, DSCP-only, AES+DSCP) are pending.")
   return {
       "project": {
           "name": "PTD-BenchLab",
@@ -271,9 +275,10 @@ def dashboard() -> dict:
               "Brute-force exact agreement validation",
               "Immutable run archive and comparison hygiene",
               "Artifact bundle export",
+              "Selectable baseline, DSCP-only, AES-only and AES + DSCP treatments",
+              "Executed emission counts, AER and DSCP false-prune audit",
           ],
           "pending": [
-              "Selectable AES/DSCP algorithm ablations",
               "Road/OSM uncertain-object generator",
               "Per-object DDR/MBR and AES trace records",
               "Actual Spark shuffle-byte instrumentation",
@@ -338,6 +343,7 @@ def launch_job(payload: dict) -> dict:
   env = os.environ.copy()
   env["RUN_ID"] = run_id
   env["BUILD_IMAGE"] = "1" if payload.get("buildImage", False) else "0"
+  env["ALGORITHM"] = algorithm_id(payload.get("algorithm", "aes-dscp"))
   if mode == "csv":
     csv_path = project_file(payload.get("csvPath"), CSV_FIXTURE)
     if csv_path.suffix.lower() != ".csv" or not csv_path.is_file():
@@ -400,6 +406,13 @@ def integer(value, name: str) -> str:
     return str(int(value))
   except (ValueError, TypeError) as exc:
     raise ValueError(f"{name} must be an integer.") from exc
+
+
+def algorithm_id(value) -> str:
+  identifier = str(value).lower()
+  if identifier not in ALGORITHMS:
+    raise ValueError(f"algorithm must be one of: {', '.join(ALGORITHMS)}.")
+  return identifier
 
 
 def list_jobs() -> list[dict]:

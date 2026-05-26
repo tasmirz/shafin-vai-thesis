@@ -87,9 +87,13 @@ configuration, logs, checksums where applicable, and exact-agreement evidence un
 ### 3. Aggregated Emission Rate (`AER`) / Ablation
 **Paper Definition:** `AER = E_AES / E_baseline × 100`. Isolates DSCP candidate eliminations and AES grouped network packet compressions.
 **Framework Mapping:**
-- DSCP behavior is exposed through candidate pruning ratios and thresholds.
-- Compact object-level Spark grouping is an AES analogue, but explicit `baseline`, `AES-only`,
-  `DSCP-only`, and `AES+DSCP` selectable runs remain required for paper-faithful ablation.
+- Selectable `baseline`, `dscp-only`, `aes-only`, and `aes-dscp` treatments execute through the
+  same Spark pipeline.
+- Non-AES treatments materialize instance-competitor emissions; AES treatments materialize one
+  aggregated competitor record per surviving instance. Saved runs record emitted records and AER.
+- DSCP treatments record thresholds, pruning ratios, and an oracle-backed `falsePrunes` audit.
+- These are Spark treatment implementations; paper-percentage reproduction still requires the
+  paper-shaped datasets and observed shuffle-byte/phase instrumentation.
 
 Validation-enabled Spark runs emit `validationPerformed=true exactAgreement=true` only after an
 oracle comparison; the attached local benchmark also records `topKAgreement`. These checks
