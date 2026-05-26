@@ -3,6 +3,7 @@ package com.thesis.topk.spark;
 import com.thesis.topk.algorithm.DdImputationSynopsis;
 import com.thesis.topk.algorithm.DominanceScorer;
 import com.thesis.topk.algorithm.ImputationEngine;
+import com.thesis.topk.algorithm.ProbabilisticTopK;
 import com.thesis.topk.model.CandidateScore;
 import com.thesis.topk.model.OpType;
 import com.thesis.topk.model.ProbabilisticInstance;
@@ -40,6 +41,17 @@ public final class SparkTopKEngine {
       DdImputationSynopsis synopsis,
       int k,
       int partitions) {
+    return rank(sc, events, queryPoints, synopsis, k, partitions, false);
+  }
+
+  public static SparkRunResult rank(
+      JavaSparkContext sc,
+      List<RawEvent> events,
+      Map<String, QueryPoint> queryPoints,
+      DdImputationSynopsis synopsis,
+      int k,
+      int partitions,
+      boolean validateExact) {
     int targetPartitions = Math.max(1, partitions);
     Broadcast<DdImputationSynopsis> synopsisBroadcast = sc.broadcast(synopsis);
 
@@ -55,7 +67,7 @@ public final class SparkTopKEngine {
 
     List<QueryRanking> rankings = new ArrayList<>();
     for (QueryPoint queryPoint : queryPoints.values()) {
-      rankings.add(rankQuery(sc, instances, queryPoint, k, targetPartitions));
+      rankings.add(rankQuery(sc, instances, queryPoint, k, targetPartitions, validateExact));
     }
 
     instances.unpersist();
@@ -69,7 +81,8 @@ public final class SparkTopKEngine {
       JavaRDD<ProbabilisticInstance> allInstances,
       QueryPoint queryPoint,
       int k,
-      int partitions) {
+      int partitions,
+      boolean validateExact) {
     JavaRDD<ProbabilisticInstance> queryInstances = allInstances
         .filter(instance -> instance.queryId().equals(queryPoint.queryId()))
         .persist(StorageLevel.MEMORY_ONLY());
@@ -77,7 +90,8 @@ public final class SparkTopKEngine {
     long queryInstanceCount = queryInstances.count();
     if (queryInstanceCount == 0) {
       queryInstances.unpersist();
-      return new QueryRanking(queryPoint.queryId(), new ArrayList<>(), 0, 0, 0, 0.0, 0L);
+      return new QueryRanking(
+          queryPoint.queryId(), new ArrayList<>(), 0, 0, 0, 0.0, 0L, validateExact, true, 0L);
     }
 
     List<ProbabilisticInstance> allForQuery = queryInstances.collect();
@@ -116,6 +130,16 @@ public final class SparkTopKEngine {
 
     long refinedCount = refined.count();
     List<CandidateScore> topK = refined.takeOrdered(k);
+    boolean exactAgreement = true;
+    long validationNanos = 0L;
+    if (validateExact) {
+      long validationStart = System.nanoTime();
+      List<String> exactIds = ProbabilisticTopK.exactTopK(allForQuery, queryPoint, k).stream()
+          .map(CandidateScore::objectId)
+          .toList();
+      exactAgreement = topK.stream().map(CandidateScore::objectId).toList().equals(exactIds);
+      validationNanos = System.nanoTime() - validationStart;
+    }
 
     long compactShuffleRecords = objectCount;
     long prunedCount = Math.max(0L, objectCount - refinedCount);
@@ -134,7 +158,10 @@ public final class SparkTopKEngine {
         refinedCount,
         prunedCount,
         tau,
-        compactShuffleRecords);
+        compactShuffleRecords,
+        validateExact,
+        exactAgreement,
+        validationNanos);
   }
 
   private static CandidateEnvelope toEnvelope(
@@ -197,6 +224,9 @@ public final class SparkTopKEngine {
     private final long prunedCount;
     private final double pruningThreshold;
     private final long compactShuffleRecords;
+    private final boolean validationPerformed;
+    private final boolean exactAgreement;
+    private final long validationNanos;
 
     public QueryRanking(
         String queryId,
@@ -206,6 +236,21 @@ public final class SparkTopKEngine {
         long prunedCount,
         double pruningThreshold,
         long compactShuffleRecords) {
+      this(queryId, topK, objectCount, refinedCount, prunedCount, pruningThreshold,
+          compactShuffleRecords, false, true, 0L);
+    }
+
+    public QueryRanking(
+        String queryId,
+        List<CandidateScore> topK,
+        long objectCount,
+        long refinedCount,
+        long prunedCount,
+        double pruningThreshold,
+        long compactShuffleRecords,
+        boolean validationPerformed,
+        boolean exactAgreement,
+        long validationNanos) {
       this.queryId = queryId;
       this.topK = topK;
       this.objectCount = objectCount;
@@ -213,6 +258,9 @@ public final class SparkTopKEngine {
       this.prunedCount = prunedCount;
       this.pruningThreshold = pruningThreshold;
       this.compactShuffleRecords = compactShuffleRecords;
+      this.validationPerformed = validationPerformed;
+      this.exactAgreement = exactAgreement;
+      this.validationNanos = validationNanos;
     }
 
     public String queryId() { return queryId; }
@@ -222,6 +270,9 @@ public final class SparkTopKEngine {
     public long prunedCount() { return prunedCount; }
     public double pruningThreshold() { return pruningThreshold; }
     public long compactShuffleRecords() { return compactShuffleRecords; }
+    public boolean validationPerformed() { return validationPerformed; }
+    public boolean exactAgreement() { return exactAgreement; }
+    public long validationNanos() { return validationNanos; }
 
     public double pruneRatio() {
       return objectCount == 0L ? 0.0 : (double) prunedCount / objectCount;
@@ -245,5 +296,9 @@ public final class SparkTopKEngine {
     public long rawEventCount() { return rawEventCount; }
     public long probabilisticInstanceCount() { return probabilisticInstanceCount; }
     public List<QueryRanking> rankings() { return rankings; }
+
+    public long validationNanos() {
+      return rankings.stream().mapToLong(QueryRanking::validationNanos).sum();
+    }
   }
 }

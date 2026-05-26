@@ -1,4 +1,4 @@
-# Probabilistic Top-k Flink Simulator Todo List
+# Probabilistic Top-k Spark Research Workbench Todo List
 
 ## 1. Project Scaffold
 
@@ -55,4 +55,31 @@
 - [x] Run the benchmark harness on dummy data.
 - [x] Fix any compile, test, or benchmark failures.
 - [x] Convert stream-facing records to Flink-friendly POJOs after Java 25 exposed Kryo/module-access issues.
-- [x] Run Dockerized MQTT -> EMQX -> Kafka -> Flink E2E validation from the CLI.
+- [x] Run Dockerized MQTT -> EMQX -> Kafka -> Spark E2E validation from the CLI.
+
+## 9. Reproducible Spark Input And Benchmark Profiles
+
+- [x] Keep the MQTT -> EMQX Kafka sink -> Kafka -> Spark pipeline as the stream-ingress path.
+- [x] Replace driver-side Kafka draining with bounded Spark Structured Streaming ingestion.
+- [x] Add a deterministic CSV-to-Spark integration fixture and executable test profile.
+- [x] Add a finite MQTT/Kafka/Spark E2E streaming test profile.
+- [x] Persist named run manifests, configuration parameters, dataset checksums, metrics, and logs.
+- [x] Add saved-run comparison output with benchmark-hygiene warnings.
+
+## 10. PTD-BenchLab Website
+
+- [x] Build a research dashboard and navigation shell described in `papers/Website Guide.md`.
+- [x] Add saved-run browsing and fair-comparison views backed by `reports/runs/*` artifacts.
+- [x] Add raw CSV inspection, schema summary, missing-value visibility, and quality status.
+- [x] Add launch forms for deterministic CSV and finite MQTT/Kafka/Spark validation profiles.
+- [x] Add exact-validation status, measured runtime/pruning analytics, log drill-down, and bundle export.
+- [ ] Add full synthetic smartphone and Bangladesh road/OSM dataset simulator screens.
+- [ ] Add probability normalization audit after paper-style uncertain-instance datasets are available.
+- [ ] Add experiment-matrix, ablation and academic LaTeX report generation screens.
+- [ ] Add detailed MQTT/Kafka/Spark telemetry for traces, actual shuffle bytes and partition skew.
+
+## 11. Paper-Faithful Experimental Expansion
+
+- [ ] Implement selectable `baseline`, `AES-only`, `DSCP-only`, and `AES+DSCP` Spark variants for ablation.
+- [ ] Measure actual Spark shuffle records/bytes and phase timing rather than only payload proxies.
+- [ ] Add paper-shaped smartphone uncertain-instance/probability data and Bangladesh OSM-road generation.

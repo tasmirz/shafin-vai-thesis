@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.e2e.yml"
-REPORT_DIR="$ROOT_DIR/reports/e2e"
+REPORT_DIR="${E2E_REPORT_DIR:-$ROOT_DIR/reports/e2e}"
+if [[ "$REPORT_DIR" != /* ]]; then
+  REPORT_DIR="$ROOT_DIR/$REPORT_DIR"
+fi
 TOPIC="${TOPIC:-thesis.raw.incomplete}"
 MQTT_TOPIC="${MQTT_TOPIC:-thesis/raw}"
 OBJECTS="${OBJECTS:-500}"
@@ -19,6 +22,7 @@ SEED="${SEED:-7}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
 MAX_EVENTS="${MAX_EVENTS:-0}"
+RUN_ID="${RUN_ID:-stream-$(date -u +%Y%m%dT%H%M%SZ)}"
 if ((MAX_EVENTS <= 0)); then
   MAX_EVENTS=$((OBJECTS * QUERIES))
 fi
@@ -33,6 +37,18 @@ else
 fi
 
 mkdir -p "$REPORT_DIR"
+REPORT_DISPLAY="${REPORT_DIR#"$ROOT_DIR/"}"
+if [[ "$REPORT_DISPLAY" == "$REPORT_DIR" ]]; then
+  REPORT_DISPLAY="$REPORT_DIR"
+fi
+if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "Invalid RUN_ID: use letters, digits, '.', '_' and '-' only" >&2
+  exit 1
+fi
+if [[ -e "$ROOT_DIR/reports/runs/$RUN_ID" ]]; then
+  echo "Run already exists: reports/runs/$RUN_ID" >&2
+  exit 1
+fi
 
 now_ms() {
   date +%s%3N
@@ -137,6 +153,7 @@ docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
   --kafkaBootstrap=kafka:9092 \
   --kafkaTopic="$TOPIC" \
   --kafkaGroupId="probabilistic-topk-spark-e2e-$(date +%s)" \
+  --checkpointLocation="/tmp/ptd-checkpoints/$RUN_ID" \
   --expectedMessages="$EXPECTED_MESSAGES" \
   --dataset="$DATASET" \
   --datasetPath="$DATASET_PATH" \
@@ -149,11 +166,16 @@ docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
   --synopsisBins="$SYNOPSIS_BINS" \
   --maxEvents="$MAX_EVENTS" \
   --seed="$SEED" \
+  --validateExact=true \
   --sparkMaster=spark://spark-master:7077 >>"$SPARK_SUBMIT_LOG" 2>&1
 spark_end_ms="$(now_ms)"
 cp "$SPARK_SUBMIT_LOG" "$SPARK_LOG"
 
 topk_results="$(grep -c 'TopKResult{' "$SPARK_LOG" || true)"
+if grep -q "exactAgreement=false" "$SPARK_LOG"; then
+  cat "$SPARK_LOG" >&2
+  exit 1
+fi
 publish_ms=$((publish_end_ms - publish_start_ms))
 ingress_ms=$((kafka_ready_ms - publish_start_ms))
 spark_ms=$((spark_end_ms - spark_start_ms))
@@ -170,7 +192,7 @@ cat >"$SUMMARY" <<EOF_SUMMARY
 Pipeline:
 
 \`\`\`text
-PythonSimulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Apache Spark bounded Kafka reader -> SparkTopKEngine -> TopKResult
+PythonSimulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka -> Apache Spark Structured Streaming bounded reader -> SparkTopKEngine -> TopKResult
 \`\`\`
 
 Config:
@@ -190,6 +212,7 @@ Config:
 - dataset: $DATASET
 - datasetPath: $DATASET_PATH
 - topicMappings: $TOPIC_MAPPINGS
+- savedRunId: $RUN_ID
 
 Timing:
 
@@ -202,9 +225,9 @@ Timing:
 
 Artifacts:
 
-- Spark log: \`reports/e2e/spark.log\`
-- Spark submit log: \`reports/e2e/spark-submit.log\`
-- CSV: \`reports/e2e/summary.csv\`
+- Spark log: \`$REPORT_DISPLAY/spark.log\`
+- Spark submit log: \`$REPORT_DISPLAY/spark-submit.log\`
+- CSV: \`$REPORT_DISPLAY/summary.csv\`
 EOF_SUMMARY
 
 cat >"$CSV" <<EOF_CSV
@@ -213,3 +236,35 @@ $OBJECTS,$QUERIES,$DIMENSIONS,$K,$MISSING_RATE,$QOS,$PARTITIONS,$SYNOPSIS_BINS,$
 EOF_CSV
 
 cat "$SUMMARY"
+
+ALGORITHM_LOG="$REPORT_DIR/algorithm-validation.log"
+echo "Running untimed exactness validation for the saved stream snapshot configuration..."
+mvn -q -DskipTests compile exec:java \
+  -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
+  -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=$SEED --partitions=$PARTITIONS --synopsisBins=$SYNOPSIS_BINS --maxEvents=$MAX_EVENTS" \
+  >"$ALGORITHM_LOG" 2>&1
+if grep -q "topKAgreement=false" "$ALGORITHM_LOG"; then
+  cat "$ALGORITHM_LOG" >&2
+  exit 1
+fi
+
+dataset_artifact=()
+if [[ -n "$DATASET_PATH" && -f "$DATASET_PATH" ]]; then
+  dataset_artifact=(--dataset-file "$DATASET_PATH")
+fi
+python3 scripts/research/archive_run.py \
+  --run-id "$RUN_ID" \
+  --mode stream \
+  --spark-log "$SPARK_LOG" \
+  --algorithm-log "$ALGORITHM_LOG" \
+  --e2e-summary "$CSV" \
+  "${dataset_artifact[@]}" \
+  --parameter "dataset=$DATASET" \
+  --parameter "objects=$OBJECTS" \
+  --parameter "queries=$QUERIES" \
+  --parameter "dimensions=$DIMENSIONS" \
+  --parameter "k=$K" \
+  --parameter "partitions=$PARTITIONS" \
+  --parameter "seed=$SEED" \
+  --parameter "missingRate=$MISSING_RATE" \
+  --parameter "mqttQos=$QOS"

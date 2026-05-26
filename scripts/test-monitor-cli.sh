@@ -4,9 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-400}"
 EXPECTED_TOPK="${EXPECTED_TOPK:-${QUERIES:-2}}"
+E2E_REPORT_DIR="${E2E_REPORT_DIR:-$ROOT_DIR/reports/e2e}"
 
 cd "$ROOT_DIR"
 
+SPARK_LOG="$E2E_REPORT_DIR/spark.log" \
+SUMMARY_CSV="$E2E_REPORT_DIR/summary.csv" \
+ALGORITHM_REPORT="$E2E_REPORT_DIR/algorithm-validation.log" \
 python3 scripts/monitor.py \
   --once \
   --expect-mqtt "$EXPECTED_MESSAGES" \
