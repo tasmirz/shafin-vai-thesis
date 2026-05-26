@@ -4,3 +4,7 @@
 target/*
 !target/probabilistic-topk-spark-1.0.0-SNAPSHOT-shaded.jar
 .venv
+datasets-osm
+datasets-curated
+reports/runs
+reports/datasets

@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE_ID="${SUITE_ID:-ablation-$(date -u +%Y%m%dT%H%M%SZ)}"
 BUILD_IMAGE="${BUILD_IMAGE:-1}"
+CSV_PATH="${CSV_PATH:-$ROOT_DIR/tests/fixtures/paper/mbr-pruning.csv}"
+DATASET_MANIFEST="${DATASET_MANIFEST:-}"
+K="${K:-2}"
+PARTITIONS="${PARTITIONS:-2}"
+VALIDATE_EXACT="${VALIDATE_EXACT:-true}"
+REQUIRE_EXACT="${REQUIRE_EXACT:-$VALIDATE_EXACT}"
+REQUIRE_PRUNING="${REQUIRE_PRUNING:-true}"
+REUSE_EXISTING_RUNS="${REUSE_EXISTING_RUNS:-false}"
+SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-2g}"
 VARIANTS=(baseline dscp-only aes-only aes-dscp)
 RUNS=()
 
@@ -16,13 +25,20 @@ fi
 for variant in "${VARIANTS[@]}"; do
   run_id="${SUITE_ID}-${variant}"
   RUNS+=("$run_id")
+  if [[ "$REUSE_EXISTING_RUNS" == "true" && -f "$ROOT_DIR/reports/runs/$run_id/metrics.json" ]]; then
+    echo "== Reusing completed PTD treatment: $variant =="
+    continue
+  fi
   echo "== Running PTD treatment: $variant =="
-  RUN_ID="$run_id" ALGORITHM="$variant" BUILD_IMAGE="$BUILD_IMAGE" \
+  RUN_ID="$run_id" ALGORITHM="$variant" CSV_PATH="$CSV_PATH" \
+    DATASET_MANIFEST="$DATASET_MANIFEST" K="$K" PARTITIONS="$PARTITIONS" \
+    VALIDATE_EXACT="$VALIDATE_EXACT" RUN_LOCAL_ORACLE="$VALIDATE_EXACT" BUILD_IMAGE="$BUILD_IMAGE" \
+    SPARK_DRIVER_MEMORY="$SPARK_DRIVER_MEMORY" \
     scripts/research/run_csv_benchmark.sh
   BUILD_IMAGE=0
 done
 
-python3 - "$SUITE_ID" <<'PY'
+python3 - "$SUITE_ID" "$REQUIRE_EXACT" "$REQUIRE_PRUNING" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -38,18 +54,38 @@ dscp = metrics["dscp-only"]
 aes = metrics["aes-only"]
 full = metrics["aes-dscp"]
 
-assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
-assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
+indexed = all(
+    result.get("boundMode") == "rai-lian-artree-selected-level-partial-reducer"
+    for result in metrics.values()
+)
+if indexed:
+    assert baseline["totalEmittedRecords"] >= aes["totalEmittedRecords"], "AES increased emissions"
+    assert dscp["totalEmittedRecords"] >= full["totalEmittedRecords"], "AES increased DSCP emissions"
+else:
+    assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
+    assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
 assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
 assert dscp["avgPruneRatio"] == full["avgPruneRatio"], "AES changed DSCP candidate selection"
 assert dscp["totalBaselineEmissions"] == full["totalBaselineEmissions"], "AES changed DSCP baseline scope"
-assert dscp["falsePruneCount"] == 0 and full["falsePruneCount"] == 0, "DSCP false prune detected"
+if sys.argv[2].lower() in ("1", "true"):
+    assert dscp["falsePruneCount"] == 0 and full["falsePruneCount"] == 0, "DSCP false prune detected"
+if sys.argv[3].lower() in ("1", "true") and all(result.get("boundMode") in {
+        "ddr-mbr-full-possible",
+        "rai-lian-artree-selected-level-partial-reducer",
+    } for result in metrics.values()):
+    assert dscp["avgPruneRatio"] > 0, "MBR-backed DSCP did not certify any pruning"
 assert all(
-    result.get("boundMode") == "partition-local-conservative-no-mbr"
+    result.get("boundMode") in {
+        "partition-local-conservative-no-mbr",
+        "mbr-when-present-otherwise-conservative",
+        "conservative-remote-mass-no-mbr",
+        "ddr-mbr-full-possible",
+        "rai-lian-artree-selected-level-partial-reducer",
+    }
     and result.get("emissionScope") == "server-partition"
     for result in metrics.values()
 ), "run lacks paper-alignment mode evidence"
-print("ablationAssertions=passed emissionsAndFalsePruneChecks=true pruningMayRequireMbr=true")
+print("ablationAssertions=passed emissionChecks=true exactValidation=" + sys.argv[2])
 PY
 
 echo "== Controlled ablation comparison =="

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "dataset": "bangladesh-osm-road-mbr",
+  "createdUtc": "2026-05-26T14:03:46.823565+00:00",
+  "csvPath": "datasets-curated/bangladesh-road-paper.csv",
+  "csvSha256": "0852ba9827c99d439cf71f10cdac0eedd13e4ce8e0a9a7e1dcfe8dca8342df3c",
+  "objects": 98451,
+  "rows": 787342,
+  "queries": 1,
+  "instancesPerObject": {
+    "minimum": 5,
+    "maximum": 11
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 8,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 12349,
+      "instances": 99292,
+      "mbr": [
+        295200.771,
+        407000.345,
+        769653.244,
+        948024.389
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 12373,
+      "instances": 98602,
+      "mbr": [
+        299620.81,
+        407124.887,
+        761926.593,
+        947381.606
+      ]
+    },
+    {
+      "serverId": 2,
+      "objects": 12309,
+      "instances": 98779,
+      "mbr": [
+        298570.888,
+        406482.838,
+        766764.093,
+        948023.194
+      ]
+    },
+    {
+      "serverId": 3,
+      "objects": 12331,
+      "instances": 98688,
+      "mbr": [
+        300195.565,
+        407319.142,
+        770077.269,
+        947992.079
+      ]
+    },
+    {
+      "serverId": 4,
+      "objects": 12424,
+      "instances": 99349,
+      "mbr": [
+        301304.968,
+        406510.829,
+        769155.156,
+        948199.197
+      ]
+    },
+    {
+      "serverId": 5,
+      "objects": 12229,
+      "instances": 97374,
+      "mbr": [
+        300408.363,
+        407253.74,
+        770669.786,
+        948322.765
+      ]
+    },
+    {
+      "serverId": 6,
+      "objects": 12302,
+      "instances": 98519,
+      "mbr": [
+        301808.481,
+        407373.051,
+        769117.934,
+        947822.151
+      ]
+    },
+    {
+      "serverId": 7,
+      "objects": 12134,
+      "instances": 96739,
+      "mbr": [
+        293757.373,
+        407022.256,
+        768637.329,
+        947917.874
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 787342,
+    "objectQueryGroups": 98451,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "sourcePath": "datasets-osm/hotosm_bgd_roads_osm_shp/roads_lines.shp",
+  "sourceSha256": "b2f11a4ba8c72bd27c3bca19a869ae91df4f43590f33c54aee7ac3ee6f0bf58c",
+  "sourceCrs": "EPSG:4326",
+  "projectedCrs": "EPSG:9678",
+  "queryPolicy": "seeded uniformly sampled point within projected dataset extent",
+  "samplePolicy": "uniform points inside each road-segment MBR"
+}

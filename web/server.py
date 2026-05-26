@@ -16,6 +16,7 @@ import mimetypes
 import os
 import re
 import subprocess
+import sys
 import threading
 import uuid
 import zipfile
@@ -31,6 +32,9 @@ STATIC_ROOT = ROOT / "web" / "static"
 RUN_ROOT = ROOT / "reports" / "runs"
 JOB_ROOT = ROOT / "reports" / "web-jobs"
 CSV_FIXTURE = ROOT / "tests" / "fixtures" / "csv" / "smartphone-small.csv"
+DATASET_ROOT = ROOT / "datasets-curated"
+DATASET_MANIFEST_ROOT = ROOT / "reports" / "datasets"
+OSM_PROTOCOL = ROOT / "config" / "research" / "bangladesh-osm-replication.json"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ALGORITHMS = ("baseline", "dscp-only", "aes-only", "aes-dscp")
 
@@ -40,14 +44,14 @@ PAPER_TARGETS = [
         "baselineMs": 66520,
         "proposedMs": 43757,
         "reductionPct": 34.2,
-        "status": "Algorithm treatments implemented; requires paper-shaped smartphone dataset",
+        "status": "Paper-shaped generator and probability audit available; execute full sweep for reproduction",
     },
     {
         "dataset": "Bangladesh road / OSM",
         "baselineMs": 56274,
         "proposedMs": 42366,
         "reductionPct": 24.7,
-        "status": "Requires spatial dataset generator",
+        "status": "OSM MBR generator implemented; execute curated benchmark suite for reproduction",
     },
 ]
 
@@ -111,6 +115,7 @@ def load_run(run_id: str, include_logs: bool = False) -> dict:
           "k": spark.get("k"),
           "partitions": spark.get("partitions"),
           "algorithm": spark.get("algorithm"),
+          "boundMode": spark.get("boundMode"),
           "algorithmElapsedMs": spark.get("algorithmElapsedMs"),
           "validationMs": spark.get("validationMs"),
           "rawEvents": spark.get("rawEvents"),
@@ -121,6 +126,11 @@ def load_run(run_id: str, include_logs: bool = False) -> dict:
           "falsePruneCount": spark.get("falsePruneCount"),
           "exactAgreement": validation.get("exactTopKAgreement"),
           "streamingKafka": spark.get("structuredStreamingKafka"),
+          "shuffleBytes": spark.get("totalShuffleBytes"),
+          "shuffleRecords": spark.get("totalShuffleRecords"),
+          "filterMs": spark.get("totalFilterMs"),
+          "refineMs": spark.get("totalRefineMs"),
+          "stragglerRatio": spark.get("maxStragglerRatio"),
       },
       "artifacts": manifest.get("artifacts", []),
   }
@@ -195,28 +205,56 @@ def csv_profile(raw_path: str | None = None) -> dict:
     raise FileNotFoundError("CSV file does not exist inside the project.")
   with path.open(newline="") as source:
     reader = csv.DictReader(source)
-    rows = list(reader)
     fields = reader.fieldnames or []
-  dimension_fields = [field for field in fields if re.fullmatch(r"a\d+", field)]
-  objects = {row.get("objectId", "") for row in rows}
-  queries = {row.get("queryId", "") for row in rows}
-  missing = sum(
-      1 for row in rows for field in dimension_fields
-      if row.get(field, "").strip().lower() in {"", "null", "nan", "?"})
-  query_counts = {}
-  for row in rows:
-    query_id = row.get("queryId", "")
-    query_counts[query_id] = query_counts.get(query_id, 0) + 1
+    dimension_fields = [field for field in fields if re.fullmatch(r"a\d+", field)]
+    objects = set()
+    queries = set()
+    missing = 0
+    records = 0
+    preview = []
+    query_counts = {}
+    probability_totals = {}
+    mbr_errors = 0
+    for row in reader:
+      records += 1
+      if len(preview) < 50:
+        preview.append(row)
+      objects.add(row.get("objectId", ""))
+      query_id = row.get("queryId", "")
+      queries.add(query_id)
+      query_counts[query_id] = query_counts.get(query_id, 0) + 1
+      missing += sum(
+          row.get(field, "").strip().lower() in {"", "null", "nan", "?"}
+          for field in dimension_fields)
+      if "probability" in fields:
+        key = (query_id, row.get("objectId", ""))
+        probability_totals[key] = probability_totals.get(key, 0.0) + float(row["probability"])
+        if {"mbrMinX", "mbrMinY", "mbrMaxX", "mbrMaxY"}.issubset(fields):
+          if not (
+              float(row["mbrMinX"]) <= float(row["a0"]) <= float(row["mbrMaxX"])
+              and float(row["mbrMinY"]) <= float(row["a1"]) <= float(row["mbrMaxY"])):
+            mbr_errors += 1
+  paper_style = "probability" in fields
+  normalization_errors = sum(
+      abs(total - 1.0) > 1.0e-6 for total in probability_totals.values())
   return {
       "path": str(path.relative_to(ROOT)),
       "columns": fields,
       "dimensions": dimension_fields,
-      "records": len(rows),
+      "records": records,
       "objects": len(objects),
       "queries": len(queries),
       "missingAttributeValues": missing,
+      "paperStyle": paper_style,
+      "probabilityAudit": {
+          "enabled": paper_style,
+          "groups": len(probability_totals),
+          "normalizationErrors": normalization_errors,
+          "mbrContainmentErrors": mbr_errors,
+          "passed": paper_style and normalization_errors == 0 and mbr_errors == 0,
+      },
       "queryCounts": query_counts,
-      "preview": rows[:50],
+      "preview": preview,
       "qualityChecks": [
           {"name": "Readable CSV schema", "passed": bool(fields), "value": f"{len(fields)} columns"},
           {"name": "At least one object", "passed": bool(objects), "value": f"{len(objects)} objects"},
@@ -226,13 +264,97 @@ def csv_profile(raw_path: str | None = None) -> dict:
               "passed": True,
               "value": f"{missing} missing attribute values",
           },
+          {
+              "name": "Probability normalization",
+              "passed": not paper_style or normalization_errors == 0,
+              "value": (
+                  f"{len(probability_totals)} object/query groups validated"
+                  if paper_style else "not applicable to raw event fixture"),
+          },
+          {
+              "name": "MBR contains sampled instances",
+              "passed": not paper_style or mbr_errors == 0,
+              "value": f"{mbr_errors} containment errors" if paper_style else "not applicable",
+          },
       ],
       "note": (
-          "The current normalized stream CSV contains incomplete attributes rather than "
-          "paper-style appearance probabilities; probability auditing becomes active once "
-          "probabilistic uncertain-object datasets are added."
+          "Appearance probabilities and MBR containment were validated for this uncertain-object artifact."
+          if paper_style else
+          "This stream CSV contains incomplete attributes; select a generated paper dataset "
+          "to activate probability and MBR auditing."
       ),
   }
+
+
+def paper_datasets() -> list[dict]:
+  if not DATASET_MANIFEST_ROOT.exists():
+    return []
+  documents = []
+  for path in DATASET_MANIFEST_ROOT.glob("*.json"):
+    try:
+      document = json_file(path)
+      document["manifestPath"] = str(path.relative_to(ROOT))
+      documents.append(document)
+    except (OSError, json.JSONDecodeError):
+      continue
+  return sorted(documents, key=lambda item: item.get("createdUtc", ""), reverse=True)
+
+
+def osm_readiness() -> dict:
+  protocol = json_file(OSM_PROTOCOL)
+  metadata_path = ROOT / protocol["source"]["metadataPath"]
+  metadata = json_file(metadata_path) if metadata_path.is_file() else {"geometry_types": {}}
+  lines = metadata["geometry_types"].get("LINESTRING", 0)
+  return {
+      "protocol": protocol,
+      "availableLineFeatures": lines,
+      "minimumLineFeatures": protocol["source"]["minimumLineFeatures"],
+      "ready": lines >= protocol["source"]["minimumLineFeatures"],
+      "sourceAvailable": metadata_path.is_file(),
+      "manifests": [
+          document for document in paper_datasets()
+          if document.get("dataset") == "bangladesh-osm-road-mbr"],
+  }
+
+
+def experiment_matrix(payload: dict | None = None) -> dict:
+  values = payload or {}
+  fields = {
+      "datasets": values.get("datasets", ["synthetic-smartphone", "bangladesh-osm-road-mbr"]),
+      "algorithms": values.get("algorithms", list(ALGORITHMS)),
+      "k": values.get("k", [5, 10, 20]),
+      "partitions": values.get("partitions", [2, 5, 8, 10]),
+      "repetitions": int(values.get("repetitions", 20)),
+  }
+  total = (
+      len(fields["datasets"]) * len(fields["algorithms"]) * len(fields["k"])
+      * len(fields["partitions"]) * fields["repetitions"])
+  return {
+      "parameters": fields,
+      "runCount": total,
+      "warning": "Large experiment matrix; schedule in batches." if total > 1000 else None,
+      "templates": [
+          "Paper reproduction", "AES/DSCP ablation", "Partition skew", "Correctness validation"],
+  }
+
+
+def latex_report(ids: list[str]) -> str:
+  selected = [load_run(run_id) for run_id in ids] if ids else list_runs()
+  lines = [
+      r"\begin{tabular}{lrrrrr}",
+      r"\hline",
+      r"Method & Time (ms) & Shuffle (B) & Emissions & AER & Exact \\",
+      r"\hline",
+  ]
+  for run in selected:
+    summary = run["summary"]
+    lines.append(
+        f"{summary.get('algorithm', 'unknown')} & {summary.get('algorithmElapsedMs') or 0} & "
+        f"{summary.get('shuffleBytes') or 0} & {summary.get('totalEmittedRecords') or 0} & "
+        f"{(summary.get('avgAER') or 0):.4f} & "
+        f"{'yes' if summary.get('exactAgreement') else 'no'} \\\\")
+  lines.extend([r"\hline", r"\end{tabular}", ""])
+  return "\n".join(lines)
 
 
 def dashboard() -> dict:
@@ -277,11 +399,13 @@ def dashboard() -> dict:
               "Artifact bundle export",
               "Selectable baseline, DSCP-only, AES-only and AES + DSCP treatments",
               "Executed emission counts, AER and DSCP false-prune audit",
+              "Paper-shaped smartphone and Bangladesh road MBR dataset builders",
+              "Probability normalization and MBR containment audit",
+              "Observed Spark shuffle bytes, phase time and skew metrics",
           ],
           "pending": [
-              "Road/OSM uncertain-object generator",
               "Per-object DDR/MBR and AES trace records",
-              "Actual Spark shuffle-byte instrumentation",
+              "Full published-scale benchmark execution and paper-number reproduction",
           ],
       },
   }
@@ -330,11 +454,13 @@ JOB_LOCK = threading.Lock()
 
 def launch_job(payload: dict) -> dict:
   mode = payload.get("mode")
-  if mode not in {"csv", "stream"}:
-    raise ValueError("Mode must be csv or stream.")
+  if mode not in {"csv", "stream", "smartphone", "osm"}:
+    raise ValueError("Mode must be csv, stream, smartphone or osm.")
   run_id = require_run_id(str(payload.get("runId", "")))
-  if (RUN_ROOT / run_id).exists():
+  if mode in {"csv", "stream"} and (RUN_ROOT / run_id).exists():
     raise ValueError("A saved run already exists with this ID.")
+  if mode in {"smartphone", "osm"} and (DATASET_MANIFEST_ROOT / f"{run_id}.json").exists():
+    raise ValueError("A generated dataset already exists with this ID.")
   with JOB_LOCK:
     if any(job.run_id == run_id and job.status == "running" for job in JOBS.values()):
       raise ValueError("A running job already uses this run ID.")
@@ -343,7 +469,8 @@ def launch_job(payload: dict) -> dict:
   env = os.environ.copy()
   env["RUN_ID"] = run_id
   env["BUILD_IMAGE"] = "1" if payload.get("buildImage", False) else "0"
-  env["ALGORITHM"] = algorithm_id(payload.get("algorithm", "aes-dscp"))
+  if mode in {"csv", "stream"}:
+    env["ALGORITHM"] = algorithm_id(payload.get("algorithm", "aes-dscp"))
   if mode == "csv":
     csv_path = project_file(payload.get("csvPath"), CSV_FIXTURE)
     if csv_path.suffix.lower() != ".csv" or not csv_path.is_file():
@@ -356,7 +483,7 @@ def launch_job(payload: dict) -> dict:
         "SYNOPSIS_BINS": positive_int(payload.get("synopsisBins", 4), "synopsisBins"),
     })
     command = [str(ROOT / "scripts" / "research" / "run_csv_benchmark.sh")]
-  else:
+  elif mode == "stream":
     objects = positive_int(payload.get("objects", 12), "objects")
     queries = positive_int(payload.get("queries", 2), "queries")
     env.update({
@@ -370,6 +497,27 @@ def launch_job(payload: dict) -> dict:
         "E2E_REPORT_DIR": str(JOB_ROOT / job_id / "e2e"),
     })
     command = [str(ROOT / "tests" / "e2e" / "test_mqtt_kafka_spark.sh")]
+  else:
+    output = DATASET_ROOT / f"{run_id}.csv"
+    manifest = DATASET_MANIFEST_ROOT / f"{run_id}.json"
+    instances_min = positive_int(payload.get("instancesMin", 5), "instancesMin")
+    instances_max = positive_int(payload.get("instancesMax", 11), "instancesMax")
+    if int(instances_min) > int(instances_max):
+      raise ValueError("instancesMin must not exceed instancesMax.")
+    common = [
+        "--output", str(output),
+        "--manifest", str(manifest),
+        "--objects", positive_int(payload.get("objects", 100), "objects"),
+        "--instances-min", instances_min,
+        "--instances-max", instances_max,
+        "--queries", positive_int(payload.get("queries", 1), "queries"),
+        "--partitions", positive_int(payload.get("partitions", 8), "partitions"),
+        "--seed", integer(payload.get("seed", 42), "seed"),
+    ]
+    script = str(ROOT / "scripts" / "research" / "build_paper_dataset.py")
+    command = (
+        [sys.executable, script, "smartphone", *common] if mode == "smartphone"
+        else ["uv", "run", "--with", "pyproj", script, "osm", *common])
   log_path = JOB_ROOT / f"{job_id}.log"
   job = Job(job_id, run_id, mode, "running", command, utc_now(), log_path)
   log = log_path.open("w")
@@ -461,6 +609,21 @@ class Handler(BaseHTTPRequestHandler):
       elif request.path == "/api/datasets/csv":
         raw_path = parse_qs(request.query).get("path", [None])[0]
         self.send_json(csv_profile(raw_path))
+      elif request.path == "/api/datasets/paper":
+        self.send_json({"datasets": paper_datasets()})
+      elif request.path == "/api/datasets/osm-readiness":
+        self.send_json(osm_readiness())
+      elif request.path == "/api/experiment-matrix":
+        self.send_json(experiment_matrix())
+      elif request.path == "/api/reports/latex":
+        ids = parse_qs(request.query).get("ids", [""])[0].split(",")
+        body = latex_report([run_id for run_id in ids if run_id]).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Disposition", 'attachment; filename="ptd-results.tex"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
       elif request.path == "/api/jobs":
         self.send_json({"jobs": list_jobs()})
       elif request.path.startswith("/api/jobs/"):
@@ -481,6 +644,11 @@ class Handler(BaseHTTPRequestHandler):
 
   def do_POST(self):
     try:
+      if self.path == "/api/experiment-matrix":
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length) or b"{}")
+        self.send_json(experiment_matrix(payload))
+        return
       if self.path != "/api/jobs":
         self.send_error_json("Unknown endpoint.", HTTPStatus.NOT_FOUND)
         return

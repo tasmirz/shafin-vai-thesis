@@ -17,6 +17,7 @@ FAIR_FIELDS = (
     "parameters.k",
     "parameters.partitions",
     "parameters.seed",
+    "parameters.sparkDriverMemory",
 )
 
 
@@ -49,17 +50,21 @@ def main():
     if len(set(values)) > 1:
       differences.append(f"{field}: " + ", ".join(str(item) for item in values))
 
-  print("| run | variant | mode | source | dataset | algorithm ms | avg prune ratio | AER | emissions | false prunes | exact |")
-  print("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |")
+  print("| run | variant | mode | source | dataset | algorithm ms | shuffle bytes | avg prune ratio | AER | emissions | skew | false prunes | exact |")
+  print("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
   for _, manifest, metrics in loaded:
     spark = metrics["spark"]
     validation = metrics["validation"]
     prune = spark["avgPruneRatio"]
+    prune_text = "n/a" if spark.get("algorithm") in ("baseline", "aes-only") else f"{prune:.4f}"
+    exact = validation["exactTopKAgreement"]
+    exact_text = "not run" if exact is None else str(exact)
     print(
         f"| {manifest['runId']} | {spark.get('algorithm')} | {manifest['mode']} | {spark['source']} | "
-        f"{spark['dataset']} | {spark.get('algorithmElapsedMs')} | "
-        f"{prune:.4f} | {spark.get('avgAER')} | {spark.get('totalEmittedRecords')} | "
-        f"{spark.get('falsePruneCount')} | {validation['exactTopKAgreement']} |")
+        f"{spark['dataset']} | {spark.get('algorithmElapsedMs')} | {spark.get('totalShuffleBytes')} | "
+        f"{prune_text} | {spark.get('avgAER')} | {spark.get('totalEmittedRecords')} | "
+        f"{spark.get('maxStragglerRatio')} | "
+        f"{spark.get('falsePruneCount')} | {exact_text} |")
   if differences:
     print("\nComparison warning: fairness-critical configuration differs.")
     for difference in differences:

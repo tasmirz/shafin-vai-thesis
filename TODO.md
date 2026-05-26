@@ -73,11 +73,11 @@
 - [x] Add raw CSV inspection, schema summary, missing-value visibility, and quality status.
 - [x] Add launch forms for deterministic CSV and finite MQTT/Kafka/Spark validation profiles.
 - [x] Add exact-validation status, measured runtime/pruning analytics, log drill-down, and bundle export.
-- [ ] Add full synthetic smartphone and Bangladesh road/OSM dataset simulator screens.
-- [ ] Surface the tracked Bangladesh OSM source-readiness manifest and road-to-MBR curation status in the website.
-- [ ] Add probability normalization audit after paper-style uncertain-instance datasets are available.
-- [ ] Add experiment-matrix, ablation and academic LaTeX report generation screens.
-- [ ] Add detailed MQTT/Kafka/Spark telemetry for traces, actual shuffle bytes and partition skew.
+- [x] Add full synthetic smartphone and Bangladesh road/OSM dataset simulator screens.
+- [x] Surface the tracked Bangladesh OSM source-readiness manifest and road-to-MBR curation status in the website.
+- [x] Add probability normalization audit after paper-style uncertain-instance datasets are available.
+- [x] Add experiment-matrix, ablation and academic LaTeX report generation screens.
+- [x] Add detailed MQTT/Kafka/Spark telemetry for phase traces, actual shuffle bytes and partition skew indicators.
 
 ## 11. Paper-Faithful Experimental Expansion
 
@@ -85,7 +85,16 @@
 - [x] Persist selected treatment, executed emission counts, AER, and DSCP false-prune audit in saved runs.
 - [x] Remove global exact-score-derived filtering bounds; execute conservative partition-local bounds and same-partition emissions.
 - [x] Add a validated Bangladesh OSM source protocol and CLI readiness check without committing raw geospatial inputs.
-- [ ] Measure actual Spark shuffle records/bytes and phase timing rather than only payload proxies.
-- [ ] Curate Bangladesh OSM line segments into projected MBRs with 5-11 normalized instances and a partition-index manifest.
-- [ ] Add paper-shaped smartphone uncertain-instance/probability data and Spark provider for curated uncertain-object rows.
-- [ ] Evaluate dynamic load balancing and worker-utilization/skew metrics inspired by `papers/3700838.3700859.pdf` after PTD spatial semantics are established.
+- [x] Measure actual Spark shuffle records/bytes and phase timing rather than only payload proxies.
+- [x] Curate Bangladesh OSM line segments into projected MBRs with 5-11 normalized instances and a partition-index manifest.
+- [x] Add paper-shaped smartphone uncertain-instance/probability data and Spark provider for curated uncertain-object rows.
+- [x] Evaluate dynamic load balancing and worker-utilization/skew metrics inspired by `papers/3700838.3700859.pdf` using partition manifests and observed Spark straggler ratios.
+
+## 12. Full Baseline Reproduction Boundary
+
+- [x] Add a same-machine ICCIT treatment comparison profile with saved reports and declared assumptions for undisclosed controls.
+- [x] Separate exact-validation fixtures from paper-sized performance executions so oracle cost is not presented as algorithm cost.
+- [x] Implement Rai-Lian distributed aggregate R-tree level selection/cost model and reducer-side partial-MBR refinement for curated MBR inputs.
+- [x] Add Rai-Lian paper-shaped synthetic uncertain-region datasets for uniform, Gaussian and Zipf (skew 0.8) centers with configurable `lmax`.
+- [ ] Add offline persisted historical/uniform query-log calibration and heap-ordered local aR-tree candidate traversal if a byte-faithful Rai-Lian Algorithms 2-3 baseline is required.
+- [ ] Execute the 98,451-object road and full smartphone controlled suites after the indexed distributed implementation is available.

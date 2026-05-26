@@ -48,6 +48,58 @@ public final class DominanceScorer {
     return score;
   }
 
+  /** Returns true only when the candidate instance dominates every point in the competitor MBR. */
+  public static boolean dynamicallyDominatesMbrFully(
+      ProbabilisticInstance candidate,
+      double[] mbrMin,
+      double[] mbrMax,
+      QueryPoint queryPoint) {
+    double[] query = queryPoint.coordinates();
+    double[] attributes = candidate.attributes();
+    boolean strictlyBetter = false;
+    for (int d = 0; d < query.length; d++) {
+      double candidateDistance = Math.abs(attributes[d] - query[d]);
+      double minimumMbrDistance = minimumDistance(query[d], mbrMin[d], mbrMax[d]);
+      if (candidateDistance > minimumMbrDistance) {
+        return false;
+      }
+      if (candidateDistance < minimumMbrDistance) {
+        strictlyBetter = true;
+      }
+    }
+    return strictlyBetter;
+  }
+
+  /** Returns true when the candidate can dominate at least one point in the competitor MBR. */
+  public static boolean dynamicallyDominatesMbrPossibly(
+      ProbabilisticInstance candidate,
+      double[] mbrMin,
+      double[] mbrMax,
+      QueryPoint queryPoint) {
+    double[] query = queryPoint.coordinates();
+    double[] attributes = candidate.attributes();
+    boolean strictlyBetter = false;
+    for (int d = 0; d < query.length; d++) {
+      double candidateDistance = Math.abs(attributes[d] - query[d]);
+      double maximumMbrDistance = Math.max(
+          Math.abs(mbrMin[d] - query[d]), Math.abs(mbrMax[d] - query[d]));
+      if (candidateDistance > maximumMbrDistance) {
+        return false;
+      }
+      if (candidateDistance < maximumMbrDistance) {
+        strictlyBetter = true;
+      }
+    }
+    return strictlyBetter;
+  }
+
+  private static double minimumDistance(double query, double lower, double upper) {
+    if (query >= lower && query <= upper) {
+      return 0.0;
+    }
+    return Math.min(Math.abs(lower - query), Math.abs(upper - query));
+  }
+
   public static double closenessUpperBound(
       List<ProbabilisticInstance> objectInstances,
       List<ProbabilisticInstance> allInstances,
@@ -64,4 +116,3 @@ public final class DominanceScorer {
     return Math.min(maxRemainingMass, exact + bestInstanceProbability);
   }
 }
-

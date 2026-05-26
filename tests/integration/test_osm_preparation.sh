@@ -15,7 +15,7 @@ report = json.loads(Path(sys.argv[1]).read_text())
 assert report["readyForCuration"] is True
 assert report["source"]["lineFeatureCount"] >= 98451
 assert report["source"]["snapshot"] == "2026-05-10"
-assert report["curationStatus"].startswith("pending")
+assert report["curationStatus"].startswith("implemented")
 print(
     "osmSourceReady=true "
     f"lineFeatures={report['source']['lineFeatureCount']} "

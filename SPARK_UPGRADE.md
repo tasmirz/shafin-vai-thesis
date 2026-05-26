@@ -17,6 +17,7 @@ This package upgrades the whole operational path to Spark, not only the Java alg
 - Spark-first recipes: `Justfile`
 - Research profiles and fixtures: `tests/fixtures`, `tests/integration`, `tests/e2e`
 - Saved run/comparison tooling: `scripts/research` and `reports/runs`
+- Rai-Lian aggregate R-tree and partial-node traversal: `src/main/java/com/thesis/topk/algorithm/index/AggregateRTree.java`
 
 ## Runtime Pipeline
 
@@ -27,6 +28,13 @@ PythonSimulator -> EMQX MQTT -> Kafka -> Spark Structured Streaming bounded read
 The AvailableNow query processes a finite Kafka snapshot after MQTT publication and terminates.
 This is the reproducible streaming-ingress test surface; PTD ranking remains a fixed-dataset
 evaluation so repeated setup comparisons have a stable input population.
+
+For curated MBR datasets, `SparkTopKEngine` constructs an aggregate R-tree for each logical
+server partition, selects a level to export by estimated index-entry plus partial-reference cost,
+and sends only partial MBR references through a reducer-shaped Spark stage. Fully dominated
+entries contribute aggregate mass directly; partial entries are recursively traversed to object
+instances before exact top-k output. This path is identified in saved runs as
+`rai-lian-artree-selected-level-partial-reducer`.
 
 ## Compose Services
 

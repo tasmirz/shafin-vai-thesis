@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "dataset": "bangladesh-osm-road-mbr",
+  "createdUtc": "2026-05-26T14:51:11.381136+00:00",
+  "csvPath": "datasets-curated/bangladesh-road-smoke.csv",
+  "csvSha256": "63e4b3d997593f1b8018281bcb58147be95ead07e128c25180f025eb61d2cd68",
+  "objects": 40,
+  "rows": 310,
+  "queries": 1,
+  "instancesPerObject": {
+    "minimum": 5,
+    "maximum": 11
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 4,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 6,
+      "instances": 52,
+      "mbr": [
+        384478.238,
+        819652.568,
+        386578.093,
+        821765.604
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 8,
+      "instances": 63,
+      "mbr": [
+        384549.021,
+        819586.07,
+        386705.055,
+        821243.343
+      ]
+    },
+    {
+      "serverId": 2,
+      "objects": 14,
+      "instances": 107,
+      "mbr": [
+        384566.493,
+        819461.559,
+        386103.374,
+        822220.33
+      ]
+    },
+    {
+      "serverId": 3,
+      "objects": 12,
+      "instances": 88,
+      "mbr": [
+        384578.745,
+        819461.824,
+        386491.546,
+        821891.668
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 310,
+    "objectQueryGroups": 40,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "sourcePath": "/home/user/Projects/shafin-vai-thesis/datasets-osm/hotosm_bgd_roads_osm_shp/roads_lines.shp",
+  "sourceSha256": "b2f11a4ba8c72bd27c3bca19a869ae91df4f43590f33c54aee7ac3ee6f0bf58c",
+  "sourceCrs": "EPSG:4326",
+  "projectedCrs": "EPSG:9678",
+  "queryPolicy": "seeded uniformly sampled point within projected dataset extent",
+  "samplePolicy": "uniform points inside each road-segment MBR"
+}

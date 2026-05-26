@@ -30,12 +30,16 @@ curl -fsS "$BASE_URL/" >"$TMP_DIR/index.html"
 curl -fsS "$BASE_URL/styles.css" >"$TMP_DIR/styles.css"
 curl -fsS "$BASE_URL/app.js" >"$TMP_DIR/app.js"
 curl -fsS "$BASE_URL/api/datasets/csv" >"$TMP_DIR/csv.json"
+curl -fsS "$BASE_URL/api/datasets/csv?path=tests/fixtures/paper/smartphone-paper-small.csv" >"$TMP_DIR/paper.csv.json"
+curl -fsS "$BASE_URL/api/datasets/osm-readiness" >"$TMP_DIR/osm.json"
+curl -fsS "$BASE_URL/api/experiment-matrix" >"$TMP_DIR/matrix.json"
+curl -fsS "$BASE_URL/api/reports/latex" >"$TMP_DIR/results.tex"
 
 grep -q "PTD-BenchLab" "$TMP_DIR/index.html"
 grep -q "Runs &amp; Compare" "$TMP_DIR/index.html"
 grep -q "\\.drawer" "$TMP_DIR/styles.css"
 grep -q "renderDashboard" "$TMP_DIR/app.js"
-python3 - "$TMP_DIR/dashboard.json" "$TMP_DIR/csv.json" <<'PY'
+python3 - "$TMP_DIR/dashboard.json" "$TMP_DIR/csv.json" "$TMP_DIR/paper.csv.json" "$TMP_DIR/osm.json" "$TMP_DIR/matrix.json" <<'PY'
 import json
 import sys
 
@@ -43,11 +47,21 @@ with open(sys.argv[1]) as source:
   dashboard = json.load(source)
 with open(sys.argv[2]) as source:
   dataset = json.load(source)
+with open(sys.argv[3]) as source:
+  paper = json.load(source)
+with open(sys.argv[4]) as source:
+  osm = json.load(source)
+with open(sys.argv[5]) as source:
+  matrix = json.load(source)
 assert dashboard["project"]["name"] == "PTD-BenchLab"
 assert "savedRuns" in dashboard["counts"]
 assert dataset["records"] == 12
 assert dataset["missingAttributeValues"] > 0
+assert paper["probabilityAudit"]["passed"] is True
+assert osm["ready"] is True
+assert matrix["runCount"] > 0
 PY
+grep -q '\\begin{tabular}' "$TMP_DIR/results.tex"
 
 mapfile -t run_ids < <(
   find reports/runs -mindepth 2 -maxdepth 2 -name manifest.json -printf '%h\n' |

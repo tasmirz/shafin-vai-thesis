@@ -28,4 +28,21 @@ class RawEventJsonSerdeTest {
     assertThat(parsed.attributes()[0]).isEqualTo(0.4);
     assertThat(Double.isNaN(parsed.attributes()[1])).isTrue();
   }
+
+  @Test
+  void retainsCuratedInstanceMetadata() {
+    RawEvent event = new RawEvent(
+        "road-1", "road-1-i0", "q0", 1234L, 0.25, 4,
+        new double[] {10.0, 20.0}, new boolean[] {false, false},
+        new double[] {9.0, 19.0}, new double[] {11.0, 21.0}, OpType.UPSERT);
+
+    RawEvent parsed = RawEventJsonSerde.fromJson(RawEventJsonSerde.toJson(event));
+
+    assertThat(parsed.instanceId()).isEqualTo("road-1-i0");
+    assertThat(parsed.appearanceProbability()).isEqualTo(0.25);
+    assertThat(parsed.serverPartition()).isEqualTo(4);
+    assertThat(parsed.mbrMin()).containsExactly(9.0, 19.0);
+    assertThat(parsed.mbrMax()).containsExactly(11.0, 21.0);
+    assertThat(parsed.hasMbr()).isTrue();
+  }
 }

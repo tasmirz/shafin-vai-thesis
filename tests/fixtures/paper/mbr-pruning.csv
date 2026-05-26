@@ -1,0 +1,7 @@
+objectId,instanceId,probability,serverId,queryId,eventTime,opType,queryA0,queryA1,a0,a1,mbrMinX,mbrMinY,mbrMaxX,mbrMaxY,source
+near-a,near-a-i0,1.0,0,q0,1700000000000,UPSERT,0.0,0.0,0.10,0.10,0.09,0.09,0.11,0.11,deterministic-mbr
+near-b,near-b-i0,1.0,0,q0,1700000000001,UPSERT,0.0,0.0,0.20,0.20,0.19,0.19,0.21,0.21,deterministic-mbr
+mid-c,mid-c-i0,1.0,0,q0,1700000000002,UPSERT,0.0,0.0,0.30,0.30,0.29,0.29,0.31,0.31,deterministic-mbr
+far-d,far-d-i0,1.0,0,q0,1700000000003,UPSERT,0.0,0.0,0.80,0.80,0.79,0.79,0.81,0.81,deterministic-mbr
+far-e,far-e-i0,1.0,0,q0,1700000000004,UPSERT,0.0,0.0,0.90,0.90,0.89,0.89,0.91,0.91,deterministic-mbr
+far-f,far-f-i0,1.0,0,q0,1700000000005,UPSERT,0.0,0.0,1.00,1.00,0.99,0.99,1.01,1.01,deterministic-mbr

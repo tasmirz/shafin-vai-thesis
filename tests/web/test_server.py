@@ -24,6 +24,7 @@ def write_run(root, run_id, partitions=2, elapsed=100, exact=True):
           "source": "simulator",
           "dataset": "csv",
           "algorithm": "aes-dscp",
+          "boundMode": "ddr-mbr-full-possible",
           "k": 2,
           "partitions": partitions,
           "algorithmElapsedMs": elapsed,
@@ -50,6 +51,12 @@ class ResearchApiTest(unittest.TestCase):
     with self.assertRaises(ValueError):
       server.csv_profile("/tmp/outside-research-data.csv")
 
+  def test_csv_profile_audits_paper_probability_fixture(self):
+    profile = server.csv_profile("tests/fixtures/paper/smartphone-paper-small.csv")
+    self.assertTrue(profile["paperStyle"])
+    self.assertTrue(profile["probabilityAudit"]["passed"])
+    self.assertEqual(0, profile["probabilityAudit"]["normalizationErrors"])
+
   def test_run_comparison_flags_partition_change(self):
     with tempfile.TemporaryDirectory() as folder:
       root = Path(folder)
@@ -71,6 +78,14 @@ class ResearchApiTest(unittest.TestCase):
         document = server.dashboard()
       self.assertEqual("fast", document["fastestExactRun"]["id"])
       self.assertEqual(2, document["counts"]["exactRuns"])
+
+  def test_saved_run_exposes_recorded_bound_mode(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "bounded")
+      with patch.object(server, "RUN_ROOT", root):
+        run = server.load_run("bounded")
+      self.assertEqual("ddr-mbr-full-possible", run["summary"]["boundMode"])
 
   def test_bundle_includes_stored_artifacts(self):
     with tempfile.TemporaryDirectory() as folder:
@@ -122,6 +137,20 @@ class ResearchApiTest(unittest.TestCase):
       with patch.object(server, "RUN_ROOT", Path(folder)):
         with self.assertRaisesRegex(ValueError, "algorithm must be one of"):
           server.launch_job({"mode": "csv", "runId": "bad-algorithm", "algorithm": "unknown"})
+
+  def test_default_experiment_matrix_includes_four_treatments(self):
+    matrix = server.experiment_matrix()
+    self.assertEqual(4, len(matrix["parameters"]["algorithms"]))
+    self.assertGreater(matrix["runCount"], 0)
+
+  def test_latex_report_uses_observed_runs(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "report-run", elapsed=90)
+      with patch.object(server, "RUN_ROOT", root):
+        report = server.latex_report(["report-run"])
+      self.assertIn("aes-dscp", report)
+      self.assertIn("\\begin{tabular}", report)
 
 
 if __name__ == "__main__":

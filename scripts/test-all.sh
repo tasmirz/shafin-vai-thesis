@@ -56,6 +56,12 @@ mvn test
 echo "== website backend unit tests =="
 just web-test
 
+echo "== research artifact parser unit tests =="
+python3 -m unittest discover -s tests/research -p 'test_*.py'
+
+echo "== paper-shaped dataset curation tests =="
+tests/integration/test_paper_datasets.sh
+
 echo "== local Spark CLI smoke test =="
 SPARK_REPORT_PATH="$TEST_OUTPUT_ROOT/spark-local.log" \
 OBJECTS=4 QUERIES=2 DIMENSIONS=4 K=2 PARTITIONS=2 SYNOPSIS_BINS=4 \

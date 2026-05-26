@@ -4,9 +4,9 @@
   "upgradePaper": "papers/An_Efficient_Distributed_Framework_for_Top-k_Dominating_Query_Over_Uncertain_Databases.pdf",
   "source": {
     "type": "HOTOSM/OpenStreetMap road export",
-    "dataPath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/roads.gpkg",
-    "metadataPath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/metadata.json",
-    "readmePath": "datasets-osm/hotosm_bgd_roads_osm_gpkg/README.txt",
+    "dataPath": "datasets-osm/hotosm_bgd_roads_osm_shp/roads_lines.shp",
+    "metadataPath": "datasets-osm/hotosm_bgd_roads_osm_shp/metadata.json",
+    "readmePath": "datasets-osm/hotosm_bgd_roads_osm_shp/README.txt",
     "expectedSnapshot": "2026-05-10",
     "requiredGeometryType": "LINESTRING",
     "minimumLineFeatures": 98451,
@@ -18,7 +18,7 @@
     "projectedUnits": "metre",
     "objectDefinition": "one uncertain object per cleaned road line/segment MBR",
     "zeroAreaMbrPolicy": "expand degenerate MBR axis by 1 metre",
-    "segmentPolicyPendingDecision": "use line features directly or split long OSM ways before MBR creation"
+    "segmentPolicy": "use exported LINESTRING road features as road-segment MBR objects"
   },
   "uncertainty": {
     "instancesPerObject": {
@@ -36,8 +36,8 @@
   },
   "status": {
     "sourceReadiness": "validated by scripts/research/validate_osm_source.py",
-    "curation": "pending geometry conversion and instance generation",
-    "sparkAdapter": "pending paper-shaped probabilistic-instance provider",
-    "paperReproductionClaim": "not permitted until curation, spatial indexing, and validation are complete"
+    "curation": "implemented by scripts/research/build_paper_dataset.py osm",
+    "sparkAdapter": "CSV provider preserves instance probability and object-level server assignment",
+    "paperReproductionClaim": "requires full experiment suite results, not dataset generation alone"
   }
 }

@@ -51,4 +51,19 @@ class ImputationEngineTest {
     assertThat(instances.get(0).probability()).isEqualTo(1.0);
     assertThat(instances.get(0).attributes()).containsExactly(0.2, 0.4);
   }
+
+  @Test
+  void curatedInstancePreservesAppearanceMassAndServerAssignment() {
+    RawEvent event = new RawEvent(
+        "road-1", "road-1-i2", "q0", 1000L, 0.2, 3,
+        new double[] {20.2, 90.4}, new boolean[] {false, false}, OpType.UPSERT);
+
+    var instances = ImputationEngine.impute(event, Map.of());
+
+    assertThat(instances).singleElement().satisfies(instance -> {
+      assertThat(instance.instanceId()).isEqualTo("road-1-i2#r0");
+      assertThat(instance.probability()).isEqualTo(0.2);
+      assertThat(instance.serverPartition()).isEqualTo(3);
+    });
+  }
 }

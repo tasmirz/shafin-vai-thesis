@@ -98,9 +98,34 @@ csv-test:
 ablation-test:
     SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_ablation_suite.sh
 
+# run the four ICCIT treatments against a curated profile and create a comparison report
+iccit-compare:
+    PROFILE="${PROFILE:-smartphone}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \
+      VALIDATE_EXACT="${VALIDATE_EXACT:-false}" BUILD_IMAGE="${BUILD_IMAGE:-1}" \
+      scripts/research/run_iccit_comparison_suite.sh
+
 # validate locally supplied Bangladesh OSM roads against the paper curation protocol
 osm-prepare-check:
     tests/integration/test_osm_preparation.sh
+
+# validate normalized smartphone, Rai-Lian synthetic and EPSG:9678 road-MBR dataset generation
+paper-datasets-test:
+    tests/integration/test_paper_datasets.sh
+
+# build a Rai-Lian synthetic uncertain-region artifact; set DISTRIBUTION/lmax through the shell
+paper-synthetic:
+    mkdir -p datasets-curated reports/datasets
+    python3 scripts/research/build_paper_dataset.py synthetic --distribution "${DISTRIBUTION:-uniform}" --lmax "${LMAX:-10}" --zipf-skew 0.8 --output "datasets-curated/rai-${DISTRIBUTION:-uniform}.csv" --manifest "reports/datasets/rai-${DISTRIBUTION:-uniform}.json" --objects "${OBJECTS:-100000}" --instances-min 2 --instances-max 10 --queries "${QUERIES:-1}" --partitions "${PARTITIONS:-8}" --seed 42
+
+# build the paper-shaped smartphone uncertain-object artifact and manifest
+paper-smartphone:
+    mkdir -p datasets-curated reports/datasets
+    python3 scripts/research/build_paper_dataset.py smartphone --output datasets-curated/smartphone-paper.csv --manifest reports/datasets/smartphone-paper.json --objects 750 --instances-min 8 --instances-max 20 --queries 20 --partitions 8 --seed 42
+
+# curate a baseline-scale Bangladesh road-MBR uncertain-object artifact and manifest
+paper-osm:
+    mkdir -p datasets-curated reports/datasets
+    uv run --with pyproj scripts/research/build_paper_dataset.py osm --output datasets-curated/bangladesh-road-paper.csv --manifest reports/datasets/bangladesh-road-paper.json --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
 
 # run MQTT -> Kafka -> Spark Structured Streaming E2E and save its artifacts
 stream-test:

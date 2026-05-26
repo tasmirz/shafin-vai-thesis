@@ -56,6 +56,40 @@ class DatasetProvidersTest {
   }
 
   @Test
+  void csvProviderRetainsNormalizedPaperInstancesAndAssignedPartitions() throws Exception {
+    Path csv = tempDir.resolve("paper.csv");
+    Files.writeString(csv, """
+        objectId,instanceId,probability,serverId,queryId,eventTime,opType,queryA0,queryA1,a0,a1,mbrMinX,mbrMinY,mbrMaxX,mbrMaxY
+        road-1,road-1-i0,0.4,2,q0,1000,UPSERT,5.0,6.0,1.0,2.0,1.0,2.0,1.1,2.1
+        road-1,road-1-i1,0.6,2,q0,1001,UPSERT,5.0,6.0,1.1,2.1,1.0,2.0,1.1,2.1
+        """);
+
+    SimulationData data = DatasetProviders.generate(
+        Args.parse(new String[] {"--dataset=csv", "--datasetPath=" + csv}));
+
+    assertThat(data.events()).hasSize(2);
+    assertThat(data.events().get(0).appearanceProbability()).isEqualTo(0.4);
+    assertThat(data.events().get(0).serverPartition()).isEqualTo(2);
+    assertThat(data.events().get(0).hasMbr()).isTrue();
+    assertThat(data.events().get(0).mbrMin()).containsExactly(1.0, 2.0);
+    assertThat(data.queryPoints().get("q0").coordinates()).containsExactly(5.0, 6.0);
+  }
+
+  @Test
+  void csvProviderRejectsNonNormalizedPaperObject() throws Exception {
+    Path csv = tempDir.resolve("invalid-paper.csv");
+    Files.writeString(csv, """
+        objectId,instanceId,probability,serverId,queryId,eventTime,opType,a0,a1
+        road-1,road-1-i0,0.4,2,q0,1000,UPSERT,1.0,2.0
+        road-1,road-1-i1,0.4,2,q0,1001,UPSERT,1.1,2.1
+        """);
+
+    assertThatThrownBy(() -> DatasetProviders.generate(
+        Args.parse(new String[] {"--dataset=csv", "--datasetPath=" + csv})))
+        .hasMessageContaining("probability does not sum to 1");
+  }
+
+  @Test
   void rawDatasetProvidersPreprocessKnownArchives() {
     SimulationConfig config = new SimulationConfig(2, 4, 1, 2, 0.25, 7L, 1000L, 5L);
 

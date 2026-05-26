@@ -163,6 +163,46 @@
             <button class="button primary" type="submit">Launch stream run</button>
           </form>
         </div>
+        <div class="two-column">
+          <form class="panel form-card" id="smartphone-generate-form">
+            <div class="badge">Paper Dataset</div>
+            <h3>Synthetic smartphone uncertainty</h3>
+            <p class="subtle">Generate normalized object instances with persistent object-to-server assignment.</p>
+            <label>Dataset ID<input name="runId" required value="smartphone-paper"></label>
+            <div class="field-pair">
+              <label>Objects<input type="number" min="1" name="objects" value="100"></label>
+              <label>Queries<input type="number" min="1" name="queries" value="1"></label>
+            </div>
+            <div class="field-pair">
+              <label>Min instances<input type="number" min="1" name="instancesMin" value="5"></label>
+              <label>Max instances<input type="number" min="1" name="instancesMax" value="11"></label>
+            </div>
+            <div class="field-pair">
+              <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
+              <label>Seed<input type="number" name="seed" value="42"></label>
+            </div>
+            <button class="button primary" type="submit">Generate smartphone dataset</button>
+          </form>
+          <form class="panel form-card" id="osm-generate-form">
+            <div class="badge teal">Spatial Dataset</div>
+            <h3>Bangladesh OSM road MBRs</h3>
+            <p class="subtle">Convert road line bounds to EPSG:9678 MBRs and sample normalized uncertain instances.</p>
+            <label>Dataset ID<input name="runId" required value="bangladesh-road-paper"></label>
+            <div class="field-pair">
+              <label>Road objects<input type="number" min="1" name="objects" value="98451"></label>
+              <label>Queries<input type="number" min="1" name="queries" value="1"></label>
+            </div>
+            <div class="field-pair">
+              <label>Min instances<input type="number" min="1" name="instancesMin" value="5"></label>
+              <label>Max instances<input type="number" min="1" name="instancesMax" value="11"></label>
+            </div>
+            <div class="field-pair">
+              <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
+              <label>Seed<input type="number" name="seed" value="42"></label>
+            </div>
+            <button class="button primary" type="submit">Curate OSM dataset</button>
+          </form>
+        </div>
         <section class="panel">
           <div class="section-head">
             <div>
@@ -188,6 +228,18 @@
           <button class="button primary" id="inspect-csv">Inspect dataset</button>
         </section>
         <div id="csv-profile"></div>
+        <div class="two-column">
+          <section class="panel">
+            <p class="eyebrow">Spatial readiness</p>
+            <h3>Bangladesh OSM protocol</h3>
+            <div id="osm-readiness"></div>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">Generated datasets</p>
+            <h3>Curated artifact manifests</h3>
+            <div id="paper-datasets"></div>
+          </section>
+        </div>
       </section>
 
       <section class="view" id="algorithms-view">
@@ -241,10 +293,10 @@
           <div class="gate-grid">
             <div class="gate passed">Exact top-k agreement<span>Captured for implemented test profiles</span></div>
             <div class="gate passed">Immutable run evidence<span>Manifests, metrics and logs</span></div>
-            <div class="gate pending">Probability normalization<span>Pending paper-style uncertain-object dataset</span></div>
+            <div class="gate passed">Probability normalization<span>Audited for generated uncertain-object artifacts</span></div>
             <div class="gate passed">AES emission comparison<span>Expanded versus aggregated executed records</span></div>
             <div class="gate passed">DSCP false-prune audit<span>Checked against exact top-k for validated runs</span></div>
-            <div class="gate pending">MBR consistency<span>Pending spatial dataset mode</span></div>
+            <div class="gate passed">MBR consistency<span>Sample points checked against generated road MBRs</span></div>
           </div>
         </section>
       </section>
@@ -267,8 +319,21 @@
         </div>
         <section class="panel">
           <h3>Communication metrics boundary</h3>
-          <p class="callout info">Compact shuffle record counts and a benchmark payload proxy are available. Actual Spark shuffle bytes and paper-defined AER require additional runtime instrumentation before they can be reported as paper results.</p>
+          <p class="callout info">Finite Spark runs now capture actual task-level shuffle bytes and records, phase timing, GC time and a straggler ratio. Report paper results only from comparable validated runs.</p>
+          <div id="telemetry-summary"></div>
         </section>
+        <div class="two-column">
+          <section class="panel">
+            <h3>Experiment matrix</h3>
+            <p class="subtle">Default paper reproduction and ablation plan.</p>
+            <div id="experiment-matrix"></div>
+          </section>
+          <section class="panel">
+            <h3>Academic report export</h3>
+            <p class="subtle">Generate a LaTeX table from currently saved benchmark evidence.</p>
+            <a class="button primary download" href="/api/reports/latex">Export LaTeX results table</a>
+          </section>
+        </div>
       </section>
 
       <section class="view" id="artifacts-view">

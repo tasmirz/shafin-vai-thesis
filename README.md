@@ -8,17 +8,21 @@ This project is upgraded to use **Apache Spark** as the execution layer for prob
 Raw uncertain events
   -> Spark parallel imputation into probabilistic instances
   -> deterministic object-to-server partition assignment
-  -> conservative partition-local LB/UB candidate-bound computation
+  -> aggregate R-tree per partition and selected exported-level LB/UB computation for MBR inputs
   -> selectable treatment: baseline | DSCP-only | AES-only | AES + DSCP
   -> optional DSCP-style per-partition kth-LB threshold pruning
-  -> expanded or AES-aggregated same-partition emission/shuffle stage
-  -> exact Spark refinement for surviving object groups
+  -> expanded or AES-aggregated partial-MBR-reference shuffle stage
+  -> reducer traversal of partial MBRs and exact Spark refinement
   -> TopKResult per query
 ```
 
-The current filter uses an index-free conservative upper allowance for remote partitions. It no
-longer computes a global exact score during filtering. Paper-faithful MBR/aR-tree tightening is
-reserved for the spatial uncertain-object adapter described below.
+Curated uncertain-object records carrying MBR coordinates build one packed aggregate R-tree per
+server partition. The engine selects an exported index level using a deterministic representative
+probe sample to estimate exported-node plus partial-reference communication cost, uses fully
+dominated node aggregates in bounds, and
+traverses partial MBR references in the reducer-shaped Spark stage. Inputs without MBR metadata,
+including generated raw stream events, use an index-free conservative remote-partition upper
+allowance. Neither mode computes a global exact score during filtering.
 
 For the finite streaming benchmark, ingress is handled by Spark Structured Streaming:
 
@@ -159,22 +163,40 @@ Built-in providers:
 - `gas`: `datasets-raw/gas+sensors+for+home+activity+monitoring.zip`.
 - `all`: Intel, pump, and gas together, processed as separate query families.
 
-### Bangladesh OSM Preparation Gate
+### Paper Dataset Curation
 
 The local `datasets-osm/` source material is intentionally not committed. Its reproducible
 pre-curation contract is tracked in `config/research/bangladesh-osm-replication.json`.
-Validate that the supplied HOTOSM/OpenStreetMap export is suitable for the next road-to-MBR
-curation step:
+Validate that the supplied HOTOSM/OpenStreetMap export is suitable for road-to-MBR curation:
 
 ```bash
 just osm-prepare-check
 ```
 
-The check verifies the recorded OSM snapshot, attribution, bounding-box metadata, metric-CRS
-plan and sufficient `LINESTRING` features for a baseline-scale run. It does not yet construct
-MBRs or sample probabilistic instances. That subsequent step must preserve the declared
-5-11 equal-probability samples per segment, object-level random server assignment and a
-spatial index per partition.
+The check verifies the OSM snapshot, attribution, bounding box, metric CRS and sufficient road
+features. Generate validated paper artifacts with:
+
+```bash
+python3 scripts/research/build_paper_dataset.py smartphone \
+  --output datasets-curated/smartphone-paper.csv \
+  --manifest reports/datasets/smartphone-paper.json \
+  --objects 750 --instances-min 8 --instances-max 20 --queries 20 --partitions 8 --seed 42
+uv run --with pyproj scripts/research/build_paper_dataset.py osm \
+  --output datasets-curated/bangladesh-road-paper.csv \
+  --manifest reports/datasets/bangladesh-road-paper.json \
+  --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
+python3 scripts/research/build_paper_dataset.py synthetic \
+  --distribution zipf --zipf-skew 0.8 --lmax 10 \
+  --output datasets-curated/rai-zipf.csv \
+  --manifest reports/datasets/rai-zipf.json \
+  --objects 100000 --instances-min 2 --instances-max 10 --queries 1 --partitions 8 --seed 42
+```
+
+The road generator converts line MBRs into EPSG:9678, uniformly samples 5-11 instances,
+normalizes appearance probabilities, assigns each object to one seeded partition and records
+a partition index manifest. The `synthetic` generator implements Rai-Lian square uncertain
+regions with uniform, Gaussian or Zipf center distributions and configurable `lmax`. The CSV
+provider consumes this evidence schema without discarding probabilities or server assignment.
 
 CSV header format:
 
@@ -183,6 +205,8 @@ objectId,queryId,eventTime,opType,a0,a1,a2,...
 ```
 
 Missing values can be blank, `null`, `NaN`, or `?`. `opType` may be blank and defaults to `UPSERT`.
+Paper-curated CSVs additionally supply `instanceId`, `probability`, `serverId`,
+`queryA0...queryAn`, and MBR bounds.
 
 For Docker/Kubernetes runs, `DATASET_PATH` must be visible inside the container. The Spark image looks under `/opt/spark/datasets-raw` for baked-in raw datasets.
 
@@ -200,12 +224,23 @@ Run the controlled four-treatment ablation on one deterministic input setup:
 RUN_ID=paper-ablation BUILD_IMAGE=0 just ablation-test
 ```
 
+Paper-sized indexed road executions require an explicit driver heap budget because the local
+Spark profile gathers distributed index summaries for broadcast:
+
+```bash
+PROFILE=road-full ALLOW_FULL_ROAD=true SPARK_DRIVER_MEMORY=8g \
+  VALIDATE_EXACT=false RUN_ID=road-full just iccit-compare
+```
+
 Selectable algorithm IDs are `baseline`, `dscp-only`, `aes-only`, and `aes-dscp`.
 Each saved query records the executed emitted-record count, baseline/AES emission counts,
-`AER`, pruning ratio, and the exact-oracle `falsePrunes` audit.
-Saved Spark runs also record that their current bound mode is
-`partition-local-conservative-no-mbr`; they are ablation-control evidence, not yet an OSM
-paper-reproduction result.
+`AER`, pruning ratio, exact-oracle `falsePrunes` audit, filtering/emission/refinement time,
+observed Spark shuffle bytes/records, executor/GC time and task-straggler ratio.
+Saved Spark runs record their bound mode: `rai-lian-artree-selected-level-partial-reducer` for curated MBR inputs and
+`conservative-remote-mass-no-mbr` for raw events without spatial summaries. The validated
+MBR ablation and road-smoke profiles demonstrate safe DSCP pruning and reducer traversal while
+preserving exact output; these are regression proofs, not claims that the published Hadoop
+percentages have been reproduced.
 
 The fixture is `tests/fixtures/csv/smartphone-small.csv`. To exercise another normalized CSV:
 
@@ -248,13 +283,15 @@ The dependency-free website is backed directly by the saved experiment evidence 
 - a dashboard for validated CSV and MQTT/Kafka/Spark runs;
 - click-through run details with configuration, per-query pruning, thresholds and logs;
 - fair-comparison warnings when seeds, partitions, dataset hashes or other controls differ;
-- CSV record inspection and input-quality summaries;
+- CSV record inspection, probability/MBR audit and input-quality summaries;
+- simulator controls and status manifests for smartphone and Bangladesh OSM road artifacts;
 - launch controls for the validated CSV and bounded streaming benchmark profiles;
-- exactness status, measured runtime/pruning charts, and downloadable evidence bundles.
+- exactness status, measured runtime/pruning/telemetry views, experiment matrix planning,
+  LaTeX table export and downloadable evidence bundles.
 
-The site can launch all four treatment variants and compare their saved AER/pruning evidence.
-Spatial road simulation, per-object DDR/MBR traces and actual Spark shuffle-byte metrics remain
-pending instrumentation; it does not present those claims from placeholder data.
+The site can launch all four treatment variants and compare saved AER/pruning/shuffle evidence.
+It does not claim the published reduction percentages until a controlled full-scale suite has
+been executed and reviewed.
 
 Validate both its artifact logic and its served HTTP endpoints from the terminal:
 
@@ -268,10 +305,11 @@ Every profile produces an immutable run directory under `reports/runs/<run-id>/`
 ```text
 manifest.json       configuration, dataset SHA-256, commit and dirty-worktree state
 metrics.json        Spark/PTD metrics, algorithm time, validation time, correctness status
-metrics.csv         query-level variant, emission, AER, pruning and validation export
+metrics.csv         query-level variant, emission, AER, pruning, phase, shuffle and validation export
 spark.log           execution evidence
 algorithm.log       CSV profile exact-vs-pruned validation evidence
 e2e-summary.csv     stream profile ingress and elapsed-time evidence
+dataset-manifest.json optional generated-dataset curation/validation evidence
 ```
 
 Compare two saved setups:

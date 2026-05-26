@@ -53,7 +53,7 @@ def main() -> None:
 
   checks: list[dict] = []
   check(config_path.exists(), "replication protocol exists", checks)
-  check(data_path.exists(), "configured OSM GeoPackage exists", checks)
+  check(data_path.exists(), "configured OSM road source exists", checks)
   check(metadata_path.exists(), "source metadata exists", checks)
   check(readme_path.exists(), "source provenance README exists", checks)
 

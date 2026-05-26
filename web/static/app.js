@@ -1,4 +1,4 @@
-const state = { dashboard: null, runs: [], csv: null, jobs: [] };
+const state = { dashboard: null, runs: [], csv: null, jobs: [], paperDatasets: [], osm: null, matrix: null };
 
 const titles = {
   dashboard: "Research Dashboard",
@@ -24,9 +24,9 @@ const algorithms = [
 const stages = [
   { name: "Input data", label: "CSV or MQTT", detail: "A run consumes either normalized CSV records or simulator events published through MQTT and bridged into Kafka.", metrics: [["CSV rows", "Dataset inspector"], ["MQTT events", "E2E summary"], ["Data checksum", "Run manifest"]] },
   { name: "Kafka ingestion", label: "Structured Streaming", detail: "Finite stream runs use Spark Structured Streaming with an AvailableNow trigger so every saved benchmark ranks a fixed snapshot.", metrics: [["Reader", "AvailableNow"], ["Evidence", "structuredStreamingKafka"], ["Source", "Kafka"]] },
-  { name: "Imputation", label: "Probabilistic instances", detail: "Incomplete values are repaired into probabilistic instances before query-relative ranking.", metrics: [["Raw events", "Recorded"], ["Probabilistic instances", "Recorded"], ["Probability normalization", "Pending paper dataset"]] },
+  { name: "Imputation", label: "Probabilistic instances", detail: "Incomplete values are repaired, while curated paper instances retain supplied normalized appearance probability.", metrics: [["Raw events", "Recorded"], ["Probabilistic instances", "Recorded"], ["Probability normalization", "Audited"]] },
   { name: "Candidate filtering", label: "Optional DSCP", detail: "The registry enables DSCP only in its named treatments and records pruning ratio, tau and zero-false-prune validation per query.", metrics: [["Pruned objects", "Recorded"], ["Threshold tau", "Recorded"], ["False prunes", "Validated"]] },
-  { name: "Emission / shuffle", label: "Optional AES", detail: "Spark materializes either expanded instance-competitor emissions or aggregated instance records, allowing AER and emitted-record comparison.", metrics: [["Emitted records", "Executed"], ["AER", "Recorded"], ["Shuffle bytes", "Pending"]] },
+  { name: "Emission / shuffle", label: "Optional AES", detail: "Spark materializes expanded or aggregated records and records task-level shuffle bytes and records.", metrics: [["Emitted records", "Executed"], ["AER", "Recorded"], ["Shuffle bytes", "Observed"]] },
   { name: "Refinement", label: "Exact top-k", detail: "Surviving candidate objects are exactly scored, then compared with the brute-force oracle when validation is enabled.", metrics: [["Algorithm elapsed", "Recorded"], ["Exact agreement", "Required"], ["Validation elapsed", "Excluded from algorithm time"]] },
   { name: "Artifact store", label: "Immutable evidence", detail: "Completed runs store parameters, Git identity, dataset checksum, metrics and logs. Comparison checks fairness-critical parameters.", metrics: [["Manifest", "Recorded"], ["Metrics CSV/JSON", "Recorded"], ["Bundle export", "Available"]] }
 ];
@@ -43,6 +43,20 @@ function formatMs(value) {
 
 function percent(value) {
   return value == null ? "n/a" : `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function hasDscp(algorithm) {
+  return algorithm === "dscp-only" || algorithm === "aes-dscp";
+}
+
+function pruningDisplay(algorithm, value) {
+  return hasDscp(algorithm) ? percent(value) : "n/a";
+}
+
+function validationDisplay(value) {
+  if (value === true) return ["Exact", ""];
+  if (value === false) return ["Incorrect", " failed"];
+  return ["Not validated", " pending"];
 }
 
 async function api(path, options) {
@@ -70,19 +84,26 @@ function openView(name) {
 
 async function refreshAll() {
   try {
-    const [dashboard, runDocument, csv, jobs] = await Promise.all([
-      api("/api/dashboard"), api("/api/runs"), api("/api/datasets/csv"), api("/api/jobs")
+    const [dashboard, runDocument, csv, jobs, datasets, osm, matrix] = await Promise.all([
+      api("/api/dashboard"), api("/api/runs"), api("/api/datasets/csv"), api("/api/jobs"),
+      api("/api/datasets/paper"), api("/api/datasets/osm-readiness"), api("/api/experiment-matrix")
     ]);
     state.dashboard = dashboard;
     state.runs = runDocument.runs;
     state.csv = csv;
     state.jobs = jobs.jobs;
+    state.paperDatasets = datasets.datasets;
+    state.osm = osm;
+    state.matrix = matrix;
     renderDashboard();
     renderRunArchive();
     renderResults();
     renderArtifacts();
     renderValidation();
     renderCsv(csv);
+    renderPaperDatasets();
+    renderTelemetry();
+    renderMatrix();
     renderJobs();
   } catch (error) {
     toast(error.message, true);
@@ -94,15 +115,18 @@ function runTable(runs, selection = false) {
   return `<div class="scroll-table"><table class="table"><thead><tr>
     ${selection ? "<th>Select</th>" : ""}
     <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Pruned</th><th>Validation</th>
-  </tr></thead><tbody>${runs.map(run => `<tr>
+  </tr></thead><tbody>${runs.map(run => {
+    const validation = validationDisplay(run.summary.exactAgreement);
+    return `<tr>
     ${selection ? `<td><input class="compare-check" type="checkbox" value="${escapeHtml(run.id)}"></td>` : ""}
     <td><button class="run-link" data-run="${escapeHtml(run.id)}">${escapeHtml(run.id)}</button></td>
     <td>${escapeHtml(run.summary.algorithm || "legacy")}</td>
     <td>${escapeHtml(run.mode)}</td>
     <td>${formatMs(run.summary.algorithmElapsedMs)}</td>
-    <td>${percent(run.summary.avgPruneRatio)}</td>
-    <td><span class="status-pill${run.summary.exactAgreement ? "" : " failed"}">${run.summary.exactAgreement ? "Exact" : "Not exact"}</span></td>
-  </tr>`).join("")}</tbody></table></div>`;
+    <td>${pruningDisplay(run.summary.algorithm, run.summary.avgPruneRatio)}</td>
+    <td><span class="status-pill${validation[1]}">${validation[0]}</span></td>
+  </tr>`;
+  }).join("")}</tbody></table></div>`;
 }
 
 function renderDashboard() {
@@ -144,7 +168,8 @@ function renderResults() {
   document.getElementById("runtime-chart").innerHTML = chartRows(
     state.runs, run => run.summary.algorithmElapsedMs || 0, maximumTime, value => formatMs(value), "");
   document.getElementById("pruning-chart").innerHTML = chartRows(
-    state.runs, run => run.summary.avgPruneRatio || 0, 1, value => percent(value), "teal");
+    state.runs.filter(run => hasDscp(run.summary.algorithm)),
+    run => run.summary.avgPruneRatio || 0, 1, value => percent(value), "teal");
 }
 
 function chartRows(runs, value, maximum, formatter, className) {
@@ -169,12 +194,15 @@ function renderArtifacts() {
 
 function renderValidation() {
   const element = document.getElementById("validation-cards");
-  element.innerHTML = state.runs.length ? state.runs.map(run => `<article class="validation-card">
-    <span class="status-pill${run.summary.exactAgreement ? "" : " failed"}">${run.summary.exactAgreement ? "Exact" : "Failed"}</span>
+  element.innerHTML = state.runs.length ? state.runs.map(run => {
+    const validation = validationDisplay(run.summary.exactAgreement);
+    return `<article class="validation-card">
+    <span class="status-pill${validation[1]}">${validation[0]}</span>
     <h4><button class="run-link" data-run="${escapeHtml(run.id)}">${escapeHtml(run.id)}</button></h4>
     <p>${run.summary.queries} queries; ${run.metrics.validation.queriesChecked} recorded agreement checks.</p>
     <p>Validation overhead: ${formatMs(run.summary.validationMs)}</p>
-  </article>`).join("") : '<div class="empty-state">Run a validation profile to populate this center.</div>';
+  </article>`;
+  }).join("") : '<div class="empty-state">Run a validation profile to populate this center.</div>';
   bindRunLinks();
 }
 
@@ -206,6 +234,35 @@ function renderCsv(data) {
       ${data.preview.map(row => `<tr>${data.columns.map(column => `<td>${escapeHtml(row[column] || "-")}</td>`).join("")}</tr>`).join("")}
     </tbody></table></div>
   </section>`;
+}
+
+function renderPaperDatasets() {
+  const osm = state.osm;
+  document.getElementById("osm-readiness").innerHTML = `<div class="detail-stats">
+    <div><label>Line features</label><strong>${Number(osm.availableLineFeatures).toLocaleString()}</strong></div>
+    <div><label>Baseline minimum</label><strong>${Number(osm.minimumLineFeatures).toLocaleString()}</strong></div>
+  </div><p class="callout ${osm.ready ? "info" : "warning"}">${osm.ready ? "Source is sufficient for paper-scale MBR curation." : "Source is below required scale."}</p>`;
+  const target = document.getElementById("paper-datasets");
+  target.innerHTML = state.paperDatasets.length ? state.paperDatasets.map(dataset => `<article class="target">
+    <header><strong>${escapeHtml(dataset.dataset)}</strong><span class="status-pill">${dataset.validation.passed ? "Valid" : "Invalid"}</span></header>
+    <p>${Number(dataset.objects).toLocaleString()} objects; ${Number(dataset.rows).toLocaleString()} rows; ${dataset.partitions} partitions</p>
+    <button class="text-action dataset-open" data-path="${escapeHtml(dataset.csvPath)}">Inspect probability audit</button>
+  </article>`).join("") : '<div class="empty-state">Generate a paper dataset to record its manifest.</div>';
+  document.querySelectorAll(".dataset-open").forEach(button => button.onclick = () => loadCsv(button.dataset.path));
+}
+
+function renderTelemetry() {
+  const measured = state.runs.filter(run => run.summary.shuffleBytes != null);
+  document.getElementById("telemetry-summary").innerHTML = measured.length
+    ? `<div class="scroll-table"><table class="table"><thead><tr><th>Run</th><th>Shuffle bytes</th><th>Shuffle records</th><th>Filter ms</th><th>Refine ms</th><th>Skew ratio</th></tr></thead><tbody>${measured.slice(0, 10).map(run => `<tr><td>${escapeHtml(run.id)}</td><td>${Number(run.summary.shuffleBytes).toLocaleString()}</td><td>${Number(run.summary.shuffleRecords).toLocaleString()}</td><td>${run.summary.filterMs}</td><td>${run.summary.refineMs}</td><td>${Number(run.summary.stragglerRatio || 0).toFixed(2)}</td></tr>`).join("")}</tbody></table></div>`
+    : '<div class="empty-state">Execute a freshly instrumented run to record Spark telemetry.</div>';
+}
+
+function renderMatrix() {
+  const matrix = state.matrix;
+  document.getElementById("experiment-matrix").innerHTML = `<div class="mini-stat"><span>Planned executions</span><strong>${Number(matrix.runCount).toLocaleString()}</strong></div>
+    <div class="quality">${matrix.templates.map(item => `<span class="quality-item">${escapeHtml(item)}</span>`).join("")}</div>
+    ${matrix.warning ? `<p class="callout warning">${escapeHtml(matrix.warning)}</p>` : ""}`;
 }
 
 function renderAlgorithms() {
@@ -267,20 +324,30 @@ async function showRun(runId) {
       <div><label>Variant</label><strong>${escapeHtml(spark.algorithm || "legacy")}</strong></div>
       <div><label>Validation elapsed</label><strong>${formatMs(spark.validationMs)}</strong></div>
       <div><label>Raw events</label><strong>${spark.rawEvents ?? "n/a"}</strong></div>
-      <div><label>Avg pruning</label><strong>${percent(spark.avgPruneRatio)}</strong></div>
+      <div><label>Avg pruning</label><strong>${pruningDisplay(spark.algorithm, spark.avgPruneRatio)}</strong></div>
       <div><label>Avg AER</label><strong>${percent(spark.avgAER)}</strong></div>
     </div>
     <div class="detail-section"><h4>Recorded configuration</h4>
       ${Object.entries(run.manifest.parameters).map(([name, value]) => `<div class="metric-row"><span>${escapeHtml(name)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+      <div class="metric-row"><span>Bound mode</span><strong>${escapeHtml(spark.boundMode || "not recorded")}</strong></div>
+      <p class="callout info">${hasDscp(spark.algorithm)
+        ? (spark.avgPruneRatio === 0 ? "No candidate satisfied UB < tau under the recorded bounds." : "Pruning is certified by UB < tau and checked against the exact oracle.")
+        : "This variant does not execute DSCP; pruning is not applicable."}</p>
     </div>
     <div class="detail-section"><h4>Query metrics</h4>
       <table class="table"><thead><tr><th>Query</th><th>Pruned</th><th>tau</th><th>Emitted</th><th>AER</th><th>False prune</th></tr></thead><tbody>
-      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${query.pruned} / ${query.objects}</td><td>${escapeHtml(query.tau)}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${query.falsePrunes ?? 0}</td></tr>`).join("")}
+      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${hasDscp(spark.algorithm) ? `${query.pruned} / ${query.objects}` : "n/a"}</td><td>${hasDscp(spark.algorithm) ? escapeHtml(query.tau) : "n/a"}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${hasDscp(spark.algorithm) ? (query.falsePrunes ?? 0) : "n/a"}</td></tr>`).join("")}
       </tbody></table>
     </div>
-    <div class="detail-section"><h4>Validation</h4><p class="callout ${run.summary.exactAgreement ? "info" : "warning"}">
-      Exact top-k agreement: ${escapeHtml(run.summary.exactAgreement)}. Queries checked: ${escapeHtml(run.metrics.validation.queriesChecked)}.
+    <div class="detail-section"><h4>Validation</h4><p class="callout ${run.summary.exactAgreement === true ? "info" : "warning"}">
+      Exact top-k agreement: ${escapeHtml(validationDisplay(run.summary.exactAgreement)[0])}. Queries checked: ${escapeHtml(run.metrics.validation.queriesChecked)}.
     </p></div>
+    <div class="detail-section"><h4>Observed Spark telemetry</h4>
+      <div class="metric-row"><span>Shuffle bytes</span><strong>${Number(spark.totalShuffleBytes || 0).toLocaleString()}</strong></div>
+      <div class="metric-row"><span>Shuffle records</span><strong>${Number(spark.totalShuffleRecords || 0).toLocaleString()}</strong></div>
+      <div class="metric-row"><span>Filter / emission / refine ms</span><strong>${spark.totalFilterMs || 0} / ${spark.totalEmissionMs || 0} / ${spark.totalRefineMs || 0}</strong></div>
+      <div class="metric-row"><span>Max straggler ratio</span><strong>${Number(spark.maxStragglerRatio || 0).toFixed(2)}</strong></div>
+    </div>
     <div class="detail-section"><h4>Spark log excerpt</h4><pre class="log">${escapeHtml(run.logs["spark.log"] || "No Spark log stored.")}</pre></div>
     <a class="button primary download" href="/api/runs/${encodeURIComponent(run.id)}/bundle">Export evidence bundle</a>`;
     document.getElementById("detail-drawer").classList.add("open");
@@ -300,7 +367,7 @@ function bindRunLinks() {
 function formBody(form, mode) {
   const values = Object.fromEntries(new FormData(form).entries());
   values.mode = mode;
-  values.buildImage = form.querySelector("[name=buildImage]").checked;
+  values.buildImage = form.querySelector("[name=buildImage]")?.checked || false;
   return values;
 }
 
@@ -350,6 +417,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("compare-selected").addEventListener("click", compareSelected);
   document.getElementById("csv-launch-form").addEventListener("submit", event => launch(event, "csv"));
   document.getElementById("stream-launch-form").addEventListener("submit", event => launch(event, "stream"));
+  document.getElementById("smartphone-generate-form").addEventListener("submit", event => launch(event, "smartphone"));
+  document.getElementById("osm-generate-form").addEventListener("submit", event => launch(event, "osm"));
   document.getElementById("close-drawer").addEventListener("click", closeDrawer);
   document.getElementById("overlay").addEventListener("click", closeDrawer);
   renderAlgorithms();

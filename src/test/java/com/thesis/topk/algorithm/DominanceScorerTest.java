@@ -30,8 +30,21 @@ class DominanceScorerTest {
     assertThat(score).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1.0e-9));
   }
 
+  @Test
+  void computesSafeFullAndPossibleDynamicDominanceAgainstMbr() {
+    QueryPoint query = new QueryPoint("q0", new double[] {0.0, 0.0});
+    ProbabilisticInstance near = instance("near", 1.0, 0.1, 0.1);
+    ProbabilisticInstance overlapping = instance("overlap", 1.0, 0.25, 0.25);
+
+    assertThat(DominanceScorer.dynamicallyDominatesMbrFully(
+        near, new double[] {0.2, 0.2}, new double[] {0.4, 0.4}, query)).isTrue();
+    assertThat(DominanceScorer.dynamicallyDominatesMbrFully(
+        overlapping, new double[] {0.2, 0.2}, new double[] {0.4, 0.4}, query)).isFalse();
+    assertThat(DominanceScorer.dynamicallyDominatesMbrPossibly(
+        overlapping, new double[] {0.2, 0.2}, new double[] {0.4, 0.4}, query)).isTrue();
+  }
+
   private static ProbabilisticInstance instance(String id, double probability, double x, double y) {
     return new ProbabilisticInstance(id, "q0", id + "#0", 1L, probability, new double[] {x, y});
   }
 }
-

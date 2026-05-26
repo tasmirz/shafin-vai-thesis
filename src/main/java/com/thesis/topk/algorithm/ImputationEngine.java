@@ -77,14 +77,19 @@ public final class ImputationEngine {
     double total = repairs.stream().mapToDouble(r -> r.probability).sum();
     for (int i = 0; i < repairs.size(); i++) {
       PartialRepair repair = repairs.get(i);
-      double normalized = total == 0.0 ? 0.0 : repair.probability / total;
+      double normalized = total == 0.0
+          ? 0.0
+          : event.appearanceProbability() * repair.probability / total;
       instances.add(new ProbabilisticInstance(
           event.objectId(),
           event.queryId(),
-          event.objectId() + "#i" + i,
+          event.instanceId() + "#r" + i,
           event.eventTime(),
           normalized,
-          repair.attributes));
+          event.serverPartition(),
+          repair.attributes,
+          event.mbrMin(),
+          event.mbrMax()));
     }
     return instances;
   }

@@ -7,6 +7,7 @@ import com.thesis.topk.dataset.DatasetProvider;
 import com.thesis.topk.dataset.DatasetProviders;
 import com.thesis.topk.dataset.DatasetRouting;
 import com.thesis.topk.model.CandidateScore;
+import com.thesis.topk.model.OpType;
 import com.thesis.topk.model.RawEvent;
 import com.thesis.topk.simulator.Args;
 import com.thesis.topk.simulator.SimulationConfig;
@@ -48,6 +49,7 @@ public final class ProbabilisticTopKSparkJob {
       sc.setLogLevel(parsed.stringValue("sparkLogLevel", "WARN"));
       SimulationData data = loadData(spark, parsed, config, dataset, source);
       DdImputationSynopsis synopsis = DdImputationSynopsis.train(data.events(), synopsisBins);
+      String boundMode = boundMode(data.events());
       SparkTopKEngine.SparkRunResult result = SparkTopKEngine.rank(
           sc,
           data.events(),
@@ -57,7 +59,7 @@ public final class ProbabilisticTopKSparkJob {
           partitions,
           algorithm,
           validateExact);
-      printReport(dataset, source, k, partitions, algorithm, synopsis, result,
+      printReport(dataset, source, k, partitions, algorithm, boundMode, synopsis, result,
           Duration.between(start, Instant.now()));
     }
   }
@@ -102,12 +104,22 @@ public final class ProbabilisticTopKSparkJob {
     return Math.max(1, config.objects() * config.queries() * Math.max(1, topicCount));
   }
 
+  private static String boundMode(List<RawEvent> events) {
+    List<RawEvent> upserts = events.stream()
+        .filter(event -> event.opType() == OpType.UPSERT)
+        .toList();
+    return !upserts.isEmpty() && upserts.stream().allMatch(RawEvent::hasMbr)
+        ? "rai-lian-artree-selected-level-partial-reducer"
+        : "conservative-remote-mass-no-mbr";
+  }
+
   private static void printReport(
       String dataset,
       String source,
       int k,
       int partitions,
       PtdAlgorithm algorithm,
+      String boundMode,
       DdImputationSynopsis synopsis,
       SparkTopKEngine.SparkRunResult result,
       Duration elapsed) {
@@ -116,9 +128,9 @@ public final class ProbabilisticTopKSparkJob {
     System.out.printf(
         "engine=apache-spark source=%s dataset=%s k=%d partitions=%d elapsedMs=%d "
             + "algorithmElapsedMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s "
-            + "boundMode=partition-local-conservative-no-mbr emissionScope=server-partition%n",
+            + "boundMode=%s emissionScope=server-partition%n",
         source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, validationMs,
-        algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled());
+        algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled(), boundMode);
     System.out.printf("rawEvents=%d probabilisticInstances=%d synopsisRules=%d synopsisBins=%d%n",
         result.rawEventCount(),
         result.probabilisticInstanceCount(),
@@ -130,6 +142,9 @@ public final class ProbabilisticTopKSparkJob {
           "TopKResult{engine=apache-spark, algorithm=%s, queryId=%s, objects=%d, refined=%d, "
               + "pruned=%d, pruneRatio=%.4f, tau=%.6f, emittedRecords=%d, "
               + "baselineEmissions=%d, aesEmissions=%d, AER=%.6f, falsePrunes=%d, "
+              + "indexedMbrPath=%s, partialMbrRefs=%d, "
+              + "filterMs=%d, emissionMs=%d, refineMs=%d, shuffleRecords=%d, shuffleBytes=%d, "
+              + "tasks=%d, executorRunMs=%d, gcMs=%d, stragglerRatio=%.4f, "
               + "validationPerformed=%s, exactAgreement=%s}%n",
           ranking.algorithmId(),
           ranking.queryId(),
@@ -143,12 +158,26 @@ public final class ProbabilisticTopKSparkJob {
           ranking.aesEmissions(),
           ranking.aggregatedEmissionRate(),
           ranking.falsePruneCount(),
+          ranking.indexedMbrPath(),
+          ranking.baselineEmissions(),
+          Duration.ofNanos(ranking.filteringNanos()).toMillis(),
+          Duration.ofNanos(ranking.emissionNanos()).toMillis(),
+          Duration.ofNanos(ranking.refinementNanos()).toMillis(),
+          ranking.observedMetrics().shuffleWriteRecords(),
+          ranking.observedMetrics().shuffleWriteBytes(),
+          ranking.observedMetrics().taskCount(),
+          ranking.observedMetrics().executorRunTimeMs(),
+          ranking.observedMetrics().jvmGcTimeMs(),
+          ranking.observedMetrics().stragglerRatio(),
           ranking.validationPerformed(),
           ranking.exactAgreement());
       System.out.printf(
           "query=%s algorithm=%s objects=%d refined=%d pruned=%d pruneRatio=%.4f tau=%.6f "
               + "emittedRecords=%d baselineEmissions=%d aesEmissions=%d AER=%.6f "
-              + "falsePrunes=%d validationPerformed=%s exactAgreement=%s%n",
+              + "falsePrunes=%d indexedMbrPath=%s partialMbrRefs=%d "
+              + "filterMs=%d emissionMs=%d refineMs=%d shuffleRecords=%d "
+              + "shuffleBytes=%d tasks=%d executorRunMs=%d gcMs=%d stragglerRatio=%.4f "
+              + "validationPerformed=%s exactAgreement=%s%n",
           ranking.queryId(),
           ranking.algorithmId(),
           ranking.objectCount(),
@@ -161,6 +190,17 @@ public final class ProbabilisticTopKSparkJob {
           ranking.aesEmissions(),
           ranking.aggregatedEmissionRate(),
           ranking.falsePruneCount(),
+          ranking.indexedMbrPath(),
+          ranking.baselineEmissions(),
+          Duration.ofNanos(ranking.filteringNanos()).toMillis(),
+          Duration.ofNanos(ranking.emissionNanos()).toMillis(),
+          Duration.ofNanos(ranking.refinementNanos()).toMillis(),
+          ranking.observedMetrics().shuffleWriteRecords(),
+          ranking.observedMetrics().shuffleWriteBytes(),
+          ranking.observedMetrics().taskCount(),
+          ranking.observedMetrics().executorRunTimeMs(),
+          ranking.observedMetrics().jvmGcTimeMs(),
+          ranking.observedMetrics().stragglerRatio(),
           ranking.validationPerformed(),
           ranking.exactAgreement());
       for (CandidateScore score : ranking.topK()) {

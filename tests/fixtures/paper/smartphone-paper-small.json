@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "dataset": "synthetic-smartphone",
+  "createdUtc": "2026-05-26T14:03:39.070994+00:00",
+  "csvPath": "tests/fixtures/paper/smartphone-paper-small.csv",
+  "csvSha256": "ffd4365b42d6a0f73e27bc39e1da4eaf87b31951c06de022404b009226c2f9f7",
+  "objects": 8,
+  "rows": 54,
+  "queries": 2,
+  "instancesPerObject": {
+    "minimum": 3,
+    "maximum": 4
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 2,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 5,
+      "instances": 17,
+      "mbr": [
+        0.21,
+        0.29,
+        0.934,
+        0.631
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 3,
+      "instances": 10,
+      "mbr": [
+        0.561,
+        0.116,
+        0.91,
+        0.529
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 54,
+    "objectQueryGroups": 16,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "attributes": [
+    "normalized_price",
+    "inverse_normalized_battery"
+  ]
+}
