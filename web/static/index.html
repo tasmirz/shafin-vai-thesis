@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PTD-BenchLab | Research Workbench</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">PTD</div>
+        <div>
+          <h1>BenchLab</h1>
+          <p>Research workbench</p>
+        </div>
+      </div>
+      <nav id="navigation" aria-label="Research modules">
+        <button class="nav-link active" data-view="dashboard">Dashboard</button>
+        <button class="nav-link" data-view="launcher">Data Simulator</button>
+        <button class="nav-link" data-view="datasets">Datasets</button>
+        <button class="nav-link" data-view="algorithms">Algorithms</button>
+        <button class="nav-link" data-view="pipeline">Pipeline</button>
+        <button class="nav-link" data-view="runs">Runs &amp; Compare</button>
+        <button class="nav-link" data-view="validation">Validation</button>
+        <button class="nav-link" data-view="results">Results</button>
+        <button class="nav-link" data-view="artifacts">Artifacts</button>
+      </nav>
+      <div class="runtime">
+        <span class="pulse"></span>
+        <div>
+          <strong>Spark runtime</strong>
+          <small>MQTT -> Kafka -> Structured Streaming</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Probabilistic top-k dominating queries</p>
+          <h2 id="view-title">Research Dashboard</h2>
+        </div>
+        <div class="top-actions">
+          <button class="button ghost" id="refresh-button">Refresh evidence</button>
+          <button class="button primary" data-open-view="launcher">New benchmark</button>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboard-view">
+        <section class="hero panel">
+          <div>
+            <p class="eyebrow accent">PTD-BenchLab</p>
+            <h3>Every reported number retains its evidence.</h3>
+            <p class="lede" id="project-subtitle"></p>
+          </div>
+          <div class="pipeline-ribbon" id="pipeline-ribbon"></div>
+        </section>
+        <div class="stat-grid" id="dashboard-stats"></div>
+        <div class="two-column wide-left">
+          <section class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Recent evidence</p>
+                <h3>Saved benchmark runs</h3>
+              </div>
+              <button class="text-action" data-open-view="runs">Compare setups</button>
+            </div>
+            <div id="recent-runs"></div>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">Paper reproduction gate</p>
+            <h3>Reported targets</h3>
+            <div id="paper-targets"></div>
+            <div class="callout warning">
+              Paper reproduction is not claimed until algorithm ablations and paper-shaped datasets are implemented.
+            </div>
+          </section>
+        </div>
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Scientific hygiene</p>
+              <h3>Current warnings and capability status</h3>
+            </div>
+          </div>
+          <div class="capability-grid">
+            <div>
+              <h4>Implemented</h4>
+              <ul class="status-list implemented" id="implemented-capabilities"></ul>
+            </div>
+            <div>
+              <h4>Pending instrumentation</h4>
+              <ul class="status-list pending" id="pending-capabilities"></ul>
+            </div>
+            <div>
+              <h4>Warnings</h4>
+              <ul class="status-list warnings" id="dashboard-warnings"></ul>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="launcher-view">
+        <div class="section-intro">
+          <p class="eyebrow">Execution control</p>
+          <h3>Launch reproducible benchmark profiles</h3>
+          <p>Each successful launch writes an immutable saved run with metrics, validation evidence and logs.</p>
+        </div>
+        <div class="two-column">
+          <form class="panel form-card" id="csv-launch-form">
+            <div class="badge">CSV -> Spark</div>
+            <h3>CSV validation setup</h3>
+            <p class="subtle">Run a bounded CSV dataset through Spark and the exact oracle.</p>
+            <label>Run ID<input name="runId" required value="csv-web-run"></label>
+            <label>CSV path<input name="csvPath" value="tests/fixtures/csv/smartphone-small.csv"></label>
+            <div class="field-pair">
+              <label>k<input type="number" min="1" name="k" value="2"></label>
+              <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
+            </div>
+            <div class="field-pair">
+              <label>Seed<input type="number" name="seed" value="42"></label>
+              <label>Synopsis bins<input type="number" min="1" name="synopsisBins" value="4"></label>
+            </div>
+            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
+            <button class="button primary" type="submit">Launch CSV run</button>
+          </form>
+
+          <form class="panel form-card" id="stream-launch-form">
+            <div class="badge teal">MQTT -> Kafka -> Spark</div>
+            <h3>Streaming validation setup</h3>
+            <p class="subtle">Publish a finite workload and consume it using Spark Structured Streaming.</p>
+            <label>Run ID<input name="runId" required value="stream-web-run"></label>
+            <div class="field-pair">
+              <label>Objects<input type="number" min="1" name="objects" value="12"></label>
+              <label>Queries<input type="number" min="1" name="queries" value="2"></label>
+            </div>
+            <div class="field-pair">
+              <label>Dimensions<input type="number" min="1" name="dimensions" value="2"></label>
+              <label>k<input type="number" min="1" name="k" value="2"></label>
+            </div>
+            <div class="field-pair">
+              <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
+              <label>Publish rate/s<input type="number" min="1" name="ratePerSecond" value="100"></label>
+            </div>
+            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
+            <button class="button primary" type="submit">Launch stream run</button>
+          </form>
+        </div>
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Job console</p>
+              <h3>Web-launched executions</h3>
+            </div>
+            <button class="text-action" id="refresh-jobs">Refresh jobs</button>
+          </div>
+          <div id="job-console" class="empty-state">No benchmark has been launched from this server process.</div>
+        </section>
+      </section>
+
+      <section class="view" id="datasets-view">
+        <div class="section-intro">
+          <p class="eyebrow">Data inspector</p>
+          <h3>Raw CSV and input quality</h3>
+          <p>Inspect real records before benchmarking. The current pipeline accepts incomplete stream-event CSV data.</p>
+        </div>
+        <section class="panel dataset-controls">
+          <label>Project CSV path
+            <input id="csv-profile-path" value="tests/fixtures/csv/smartphone-small.csv">
+          </label>
+          <button class="button primary" id="inspect-csv">Inspect dataset</button>
+        </section>
+        <div id="csv-profile"></div>
+      </section>
+
+      <section class="view" id="algorithms-view">
+        <div class="section-intro">
+          <p class="eyebrow">Algorithm registry</p>
+          <h3>Available and required variants</h3>
+          <p>The registry separates implemented behavior from the paper reproduction work that remains.</p>
+        </div>
+        <div class="algorithm-grid" id="algorithm-grid"></div>
+      </section>
+
+      <section class="view" id="pipeline-view">
+        <div class="section-intro">
+          <p class="eyebrow">Pipeline debugger</p>
+          <h3>Bounded stream-to-result execution path</h3>
+          <p>Stage details expose what is measured today and which internal counters still require algorithm instrumentation.</p>
+        </div>
+        <section class="panel pipeline-viewer">
+          <div class="stage-list" id="stage-list"></div>
+          <article class="stage-detail" id="stage-detail"></article>
+        </section>
+      </section>
+
+      <section class="view" id="runs-view">
+        <div class="section-intro">
+          <p class="eyebrow">Experiment tracking</p>
+          <h3>Saved runs and configuration comparison</h3>
+          <p>Select two or more immutable runs. The comparison refuses to conceal differences in benchmark setup.</p>
+        </div>
+        <section class="panel">
+          <div class="section-head">
+            <h3>Run archive</h3>
+            <button class="button primary compact" id="compare-selected">Compare selected</button>
+          </div>
+          <div id="run-archive"></div>
+        </section>
+        <section class="panel" id="comparison-panel">
+          <div class="empty-state">Select runs above to compute a fair-comparison report.</div>
+        </section>
+      </section>
+
+      <section class="view" id="validation-view">
+        <div class="section-intro">
+          <p class="eyebrow">Correctness center</p>
+          <h3>Exactness before performance claims</h3>
+          <p>Executed Spark rankings are paired with brute-force agreement checks in each stored validation run.</p>
+        </div>
+        <div id="validation-cards" class="validation-grid"></div>
+        <section class="panel">
+          <h3>Required validation gates</h3>
+          <div class="gate-grid">
+            <div class="gate passed">Exact top-k agreement<span>Captured for implemented test profiles</span></div>
+            <div class="gate passed">Immutable run evidence<span>Manifests, metrics and logs</span></div>
+            <div class="gate pending">Probability normalization<span>Pending paper-style uncertain-object dataset</span></div>
+            <div class="gate pending">AES losslessness<span>Pending explicit AES variant records</span></div>
+            <div class="gate pending">DSCP false-prune audit<span>Pending per-object bound trace</span></div>
+            <div class="gate pending">MBR consistency<span>Pending spatial dataset mode</span></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="results-view">
+        <div class="section-intro">
+          <p class="eyebrow">Result analytics</p>
+          <h3>Measured runtimes and pruning evidence</h3>
+          <p>Charts below use saved local executions, not paper target values. Select a bar to inspect its artifacts.</p>
+        </div>
+        <div class="two-column">
+          <section class="panel">
+            <h3>Algorithm elapsed time</h3>
+            <div id="runtime-chart" class="bar-chart"></div>
+          </section>
+          <section class="panel">
+            <h3>Average pruning ratio</h3>
+            <div id="pruning-chart" class="bar-chart"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h3>Communication metrics boundary</h3>
+          <p class="callout info">Compact shuffle record counts and a benchmark payload proxy are available. Actual Spark shuffle bytes and paper-defined AER require additional runtime instrumentation before they can be reported as paper results.</p>
+        </section>
+      </section>
+
+      <section class="view" id="artifacts-view">
+        <div class="section-intro">
+          <p class="eyebrow">Reproducibility packages</p>
+          <h3>Export evidence bundles</h3>
+          <p>Bundle exports contain exactly the stored run artifacts: manifest, metrics, CSV measurements and captured logs.</p>
+        </div>
+        <div id="artifact-grid" class="artifact-grid"></div>
+      </section>
+    </main>
+
+    <aside class="drawer" id="detail-drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <div>
+          <p class="eyebrow">Run evidence</p>
+          <h3 id="drawer-title"></h3>
+        </div>
+        <button class="icon-button" id="close-drawer" aria-label="Close details">x</button>
+      </div>
+      <div id="drawer-content"></div>
+    </aside>
+    <div class="overlay" id="overlay"></div>
+    <div class="toast" id="toast" role="status"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

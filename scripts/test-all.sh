@@ -15,6 +15,17 @@ PARTITIONS="${PARTITIONS:-4}"
 CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
 SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
 MAX_EVENTS="${MAX_EVENTS:-$((OBJECTS * QUERIES))}"
+TEST_OUTPUT_ROOT="$(mktemp -d /tmp/thesis-test-all.XXXXXX)"
+E2E_REPORT_DIR="$TEST_OUTPUT_ROOT/e2e"
+MONITOR_STARTED=0
+cleanup() {
+  if [[ "$MONITOR_STARTED" == "1" && -f /tmp/thesis-monitor.pid ]]; then
+    kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true
+    rm -f /tmp/thesis-monitor.pid
+  fi
+  rm -rf "$TEST_OUTPUT_ROOT"
+}
+trap cleanup EXIT
 if [[ "$DATASET" == "all" ]]; then
   EXPECTED_MESSAGES="${EXPECTED_MESSAGES:-$((MAX_EVENTS * 3))}"
   MONITOR_ENV=(
@@ -42,7 +53,11 @@ scripts/setup-venv.sh
 echo "== unit tests =="
 mvn test
 
+echo "== website backend unit tests =="
+just web-test
+
 echo "== local Spark CLI smoke test =="
+SPARK_REPORT_PATH="$TEST_OUTPUT_ROOT/spark-local.log" \
 OBJECTS=4 QUERIES=2 DIMENSIONS=4 K=2 PARTITIONS=2 SYNOPSIS_BINS=4 \
   just spark >/tmp/thesis-spark-local-cli.log 2>&1
 grep -q "engine=apache-spark source=simulator" /tmp/thesis-spark-local-cli.log
@@ -51,10 +66,16 @@ grep -q "TopKResult{" /tmp/thesis-spark-local-cli.log
 echo "== package and docker image =="
 mvn -q -DskipTests package
 docker build -t thesis-topk-spark:local .
-docker run --rm thesis-topk-spark:local /opt/spark/bin/spark-submit --version 2>&1 | grep -qi "spark"
+docker run --rm thesis-topk-spark:local /opt/spark/bin/spark-submit --version 2>&1 | grep -i "spark" >/dev/null
 docker build -f docker/simulator/Dockerfile -t thesis-simulator:local .
 docker run --rm thesis-simulator:local --dataset=all --max-events=1 --dry-run --json >/tmp/thesis-simulator-image-check.json
 python3 -m json.tool /tmp/thesis-simulator-image-check.json >/dev/null
+
+echo "== CSV-to-Spark research integration profile =="
+RUN_ID="csv-test-all-$(date -u +%Y%m%dT%H%M%SZ)-$$" BUILD_IMAGE=0 tests/integration/test_csv_spark.sh
+
+echo "== PTD-BenchLab website HTTP smoke test =="
+just web-smoke-test
 
 echo "== compose config =="
 docker compose -f docker-compose.e2e.yml config >/dev/null
@@ -76,12 +97,11 @@ print(f"k8s resources: {len(docs)}")
 PY
 
 echo "== algorithm performance benchmark =="
-mkdir -p reports/algorithm
 mvn -q -DskipTests compile exec:java \
   -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
   -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=7 --partitions=$PARTITIONS --candidateMultiplier=$CANDIDATE_MULTIPLIER --synopsisBins=$SYNOPSIS_BINS" \
-  > reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
-tail -n 8 reports/algorithm/topk-${OBJECTS}x${QUERIES}.txt
+  > "$TEST_OUTPUT_ROOT/algorithm-benchmark.log"
+tail -n 8 "$TEST_OUTPUT_ROOT/algorithm-benchmark.log"
 
 echo "== full Spark e2e benchmark =="
 OBJECTS="$OBJECTS" \
@@ -98,27 +118,28 @@ EXPECTED_MESSAGES="$EXPECTED_MESSAGES" \
 PARTITIONS="$PARTITIONS" \
 SYNOPSIS_BINS="$SYNOPSIS_BINS" \
 BUILD_IMAGE=0 \
+E2E_REPORT_DIR="$E2E_REPORT_DIR" \
 env "${MONITOR_ENV[@]}" \
 scripts/e2e-benchmark.sh
 
 echo "== monitor cli assertions =="
-env "${MONITOR_ENV[@]}" EXPECTED_MESSAGES="$EXPECTED_MESSAGES" EXPECTED_TOPK="$QUERIES" scripts/test-monitor-cli.sh
+env "${MONITOR_ENV[@]}" E2E_REPORT_DIR="$E2E_REPORT_DIR" EXPECTED_MESSAGES="$EXPECTED_MESSAGES" EXPECTED_TOPK="$QUERIES" scripts/test-monitor-cli.sh
 
 echo "== strict e2e artifact and live-state validation =="
 env "${MONITOR_ENV[@]}" python3 scripts/validate-e2e.py \
   --expected-messages "$EXPECTED_MESSAGES" \
-  --expected-queries "$QUERIES"
+  --expected-queries "$QUERIES" \
+  --report-dir "$E2E_REPORT_DIR"
 
 echo "== gui http smoke test =="
-if ! curl -fsS http://localhost:8088/api/tests/status >/dev/null 2>&1; then
-  if [[ -f /tmp/thesis-monitor.pid ]]; then
-    kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true
-  fi
-  fuser -k 8088/tcp >/dev/null 2>&1 || true
-  setsid env PORT=8088 scripts/monitor.sh >/tmp/thesis-monitor.log 2>&1 < /dev/null &
-  echo $! >/tmp/thesis-monitor.pid
-  sleep 1
+if [[ -f /tmp/thesis-monitor.pid ]]; then
+  kill "$(cat /tmp/thesis-monitor.pid)" >/dev/null 2>&1 || true
 fi
+fuser -k 8088/tcp >/dev/null 2>&1 || true
+setsid env PORT=8088 SPARK_LOG="$E2E_REPORT_DIR/spark.log" SUMMARY_CSV="$E2E_REPORT_DIR/summary.csv" ALGORITHM_REPORT="$E2E_REPORT_DIR/algorithm-validation.log" scripts/monitor.sh >/tmp/thesis-monitor.log 2>&1 < /dev/null &
+echo $! >/tmp/thesis-monitor.pid
+MONITOR_STARTED=1
+sleep 1
 curl -fsS http://localhost:8088/ >/tmp/thesis-monitor.html
 grep -q "Thesis Stream Monitor" /tmp/thesis-monitor.html
 grep -q "Spark Outgress" /tmp/thesis-monitor.html

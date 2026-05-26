@@ -6,7 +6,7 @@ This package upgrades the whole operational path to Spark, not only the Java alg
 
 - Spark RDD engine: `src/main/java/com/thesis/topk/spark/SparkTopKEngine.java`
 - Spark application entry point: `src/main/java/com/thesis/topk/spark/ProbabilisticTopKSparkJob.java`
-- Bounded Kafka input for Spark jobs using Kafka consumer APIs
+- Bounded Kafka input through Spark Structured Streaming and `Trigger.AvailableNow()`
 - Spark Docker runtime: `Dockerfile` and `Dockerfile.spark`
 - Spark Docker Compose stack: `docker-compose.e2e.yml`
 - Spark Kubernetes manifest: `k8s/pipeline.yaml`
@@ -15,12 +15,18 @@ This package upgrades the whole operational path to Spark, not only the Java alg
 - Spark validation: `scripts/validate-e2e.py`
 - Spark monitor labels and metrics: `scripts/monitor.py`
 - Spark-first recipes: `Justfile`
+- Research profiles and fixtures: `tests/fixtures`, `tests/integration`, `tests/e2e`
+- Saved run/comparison tooling: `scripts/research` and `reports/runs`
 
 ## Runtime Pipeline
 
 ```text
-PythonSimulator -> EMQX MQTT -> Kafka -> Spark bounded Kafka reader -> SparkTopKEngine -> TopKResult
+PythonSimulator -> EMQX MQTT -> Kafka -> Spark Structured Streaming bounded reader -> SparkTopKEngine -> TopKResult
 ```
+
+The AvailableNow query processes a finite Kafka snapshot after MQTT publication and terminates.
+This is the reproducible streaming-ingress test surface; PTD ranking remains a fixed-dataset
+evaluation so repeated setup comparisons have a stable input population.
 
 ## Compose Services
 
@@ -39,3 +45,15 @@ PythonSimulator -> EMQX MQTT -> Kafka -> Spark bounded Kafka reader -> SparkTopK
 ## Notes
 
 The legacy Flink Java package remains in the source tree for comparison, but it is no longer the default deployment path.
+
+## Research Profiles
+
+```bash
+RUN_ID=csv-baseline just csv-test
+RUN_ID=stream-baseline just stream-test
+just compare-runs csv-baseline csv-alternative
+```
+
+Saved run directories include a manifest, metrics exports, logs, dataset checksum when a source
+file is used, and exact-agreement evidence where the oracle benchmark is run. Reported
+`algorithmElapsedMs` excludes the measured oracle validation duration.

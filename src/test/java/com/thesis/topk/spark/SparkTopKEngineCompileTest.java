@@ -7,7 +7,10 @@ import org.junit.jupiter.api.Test;
 class SparkTopKEngineCompileTest {
   @Test
   void sparkEngineResultTypesAreAvailableToMavenTests() {
-    SparkTopKEngine.QueryRanking ranking = new SparkTopKEngine.QueryRanking("q0", java.util.List.of(), 10, 7, 3, 0.2, 10);
+    SparkTopKEngine.QueryRanking ranking =
+        new SparkTopKEngine.QueryRanking("q0", java.util.List.of(), 10, 7, 3, 0.2, 10, true, true, 0L);
     assertThat(ranking.pruneRatio()).isEqualTo(0.3);
+    assertThat(ranking.validationPerformed()).isTrue();
+    assertThat(ranking.exactAgreement()).isTrue();
   }
 }

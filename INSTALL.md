@@ -59,6 +59,53 @@ Run complete E2E:
 OBJECTS=200 QUERIES=2 EXPECTED_MESSAGES=400 just e2e
 ```
 
+## Research Validation Profiles
+
+The CSV profile is deterministic and runs inside the Java 17 Spark image, independent of the
+host Java version:
+
+```bash
+RUN_ID=csv-baseline just csv-test
+```
+
+The streaming profile retains the complete MQTT -> Kafka -> Spark route and uses Spark
+Structured Streaming to drain the finite test snapshot:
+
+```bash
+RUN_ID=stream-baseline OBJECTS=12 QUERIES=2 K=2 just stream-test
+```
+
+Compare preserved run artifacts:
+
+```bash
+just compare-runs csv-baseline stream-baseline
+```
+
+Automated full validation isolates transient E2E output from tracked result snapshots:
+
+```bash
+OBJECTS=12 QUERIES=2 DIMENSIONS=2 K=2 PARTITIONS=2 just test-all
+```
+
+## PTD-BenchLab Website
+
+Serve the local research workbench over saved run artifacts:
+
+```bash
+just web
+```
+
+Open `http://127.0.0.1:8090`. The site can launch the validated CSV and
+MQTT/Kafka/Spark profiles, inspect CSV records, compare saved runs with
+fairness warnings, inspect validation/log evidence, and export bundles.
+
+Validate the website backend:
+
+```bash
+just web-test
+just web-smoke-test
+```
+
 ## Kubernetes
 
 ```bash

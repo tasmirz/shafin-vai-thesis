@@ -36,6 +36,13 @@ TEST_PROCESS = None
 TEST_STATE = {"state": "idle", "profile": None, "startedAt": None, "finishedAt": None, "returnCode": None}
 
 
+def display_path(path):
+  try:
+    return str(path.relative_to(ROOT))
+  except ValueError:
+    return str(path)
+
+
 def run(cmd, timeout=8):
   try:
     result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=timeout, check=False)
@@ -132,7 +139,7 @@ def parse_spark_log():
     "topKResults": len(re.findall(r"TopKResult\{", text)),
     "errors": len(re.findall(r"\b(ERROR|Exception)\b", text)),
     "warnings": len(re.findall(r"\bWARN\b", text)),
-    "path": str(SPARK_LOG.relative_to(ROOT)),
+    "path": display_path(SPARK_LOG),
   }
 
 
@@ -365,8 +372,19 @@ def start_test(profile, dataset="synthetic"):
       return False, dict(TEST_STATE)
     TEST_LOG.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+
+    # Configure dataset-specific TOPIC_MAPPINGS and ACTION_IDS
+    if dataset == "all":
+      env["TOPIC_MAPPINGS"] = "thesis/raw/intel=thesis.raw.intel,thesis/raw/pump=thesis.raw.pump,thesis/raw/gas=thesis.raw.gas"
+      env["ACTION_IDS"] = "kafka_producer:raw_incomplete_to_kafka_thesis_raw_intel,kafka_producer:raw_incomplete_to_kafka_thesis_raw_pump,kafka_producer:raw_incomplete_to_kafka_thesis_raw_gas"
+      topics = 3
+    elif dataset in ("intel", "pump", "gas"):
+      env["TOPIC_MAPPINGS"] = f"thesis/raw/{dataset}=thesis.raw.{dataset}"
+      env["ACTION_IDS"] = f"kafka_producer:raw_incomplete_to_kafka_thesis_raw_{dataset}"
+      topics = 1
+    else:
+      topics = 1
     
-    topics = 3 if dataset == "all" else 1
     if profile == "raw":
       max_events = 5
       expected = max_events * topics
@@ -493,19 +511,44 @@ function draw() {
   canvas.height = 220 * devicePixelRatio;
   ctx.scale(devicePixelRatio, devicePixelRatio);
   ctx.clearRect(0, 0, rect.width, 220);
-  const pad = 28, w = rect.width - pad * 2, h = 160;
-  const max = Math.max(1, ...history.flatMap(p => [p.mqtt, p.kafka, p.spark]));
-  ctx.strokeStyle = "#d0d5dd"; ctx.beginPath(); ctx.moveTo(pad, 180); ctx.lineTo(pad + w, 180); ctx.stroke();
+  const pad = 50, w = rect.width - pad * 2, h = 160, top = 20;
+
+  // Calculate max from recent data for better scaling
+  const recentData = history.slice(-20).flatMap(p => [p.mqtt, p.kafka, p.spark]);
+  const max = Math.max(10, ...recentData); // min 10 for scale
+
+  // Draw grid
+  ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + (h / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad - 5, y); ctx.lineTo(pad + w, y); ctx.stroke();
+  }
+
+  // Draw axis
+  ctx.strokeStyle = "#d0d5dd"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, top + h); ctx.lineTo(pad + w, top + h); ctx.stroke();
+
+  // Draw y-axis labels
+  ctx.fillStyle = "#666"; ctx.font = "11px monospace"; ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const y = top + (h / 4) * i;
+    const val = Math.round((max * (4 - i) / 4));
+    ctx.fillText(val, pad - 10, y + 4);
+  }
+
+  // Draw data lines
   [["mqtt","#2563eb"],["kafka","#0f766e"],["spark","#b54708"]].forEach(([key,color]) => {
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
     history.forEach((p, i) => {
       const x = pad + (history.length === 1 ? 0 : i * w / (history.length - 1));
-      const y = 180 - (p[key] / max) * h;
+      const y = top + h - (p[key] / max) * h;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
     ctx.stroke();
   });
-  ctx.fillStyle = "#344054"; ctx.font = "12px sans-serif";
+
+  // Draw legend
+  ctx.fillStyle = "#344054"; ctx.font = "12px sans-serif"; ctx.textAlign = "left";
   ctx.fillText("MQTT", pad, 204); ctx.fillStyle = "#2563eb"; ctx.fillRect(pad + 38, 196, 18, 3);
   ctx.fillStyle = "#344054"; ctx.fillText("Kafka", pad + 70, 204); ctx.fillStyle = "#0f766e"; ctx.fillRect(pad + 112, 196, 18, 3);
   ctx.fillStyle = "#344054"; ctx.fillText("Spark", pad + 144, 204); ctx.fillStyle = "#b54708"; ctx.fillRect(pad + 184, 196, 18, 3);

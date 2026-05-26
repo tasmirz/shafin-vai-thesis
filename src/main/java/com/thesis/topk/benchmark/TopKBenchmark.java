@@ -31,21 +31,25 @@ public final class TopKBenchmark {
     String dataset = parsed.stringValue("dataset", "synthetic");
     SimulationData data = DatasetProviders.byName(dataset).generate(config, parsed);
     DataSplit split = holdoutSplit(data.events());
-    DdImputationSynopsis synopsis = DdImputationSynopsis.train(split.training(), synopsisBins);
-    DdImputationSynopsis.Evaluation imputation = synopsis.evaluate(split.holdout());
+    DdImputationSynopsis validationSynopsis = DdImputationSynopsis.train(split.training(), synopsisBins);
+    DdImputationSynopsis.Evaluation imputation = validationSynopsis.evaluate(split.holdout());
+    // Ranking must use the same complete training population as the Spark benchmark under test.
+    DdImputationSynopsis synopsis = DdImputationSynopsis.train(data.events(), synopsisBins);
     List<ProbabilisticInstance> instances = new ArrayList<>();
     data.events().forEach(event -> instances.addAll(ImputationEngine.impute(event, synopsis)));
+    int eventObjectCount = (int) data.events().stream().map(RawEvent::objectId).distinct().count();
+    int dimensions = data.events().isEmpty() ? config.dimensions() : data.events().get(0).attributes().length;
 
     System.out.printf(
         "dataset provider=%s objects=%d events=%d instances=%d dimensions=%d queries=%d k=%d missingRate=%.3f "
             + "seed=%d partitions=%d executionEngine=java-local partitionModelNodes=%d "
             + "shuffleMetric=calculated-candidate-proxy%n",
         dataset,
-        config.objects(),
+        eventObjectCount,
         data.events().size(),
         instances.size(),
-        config.dimensions(),
-        config.queries(),
+        dimensions,
+        data.queryPoints().size(),
         config.k(),
         config.missingRate(),
         config.seed(),

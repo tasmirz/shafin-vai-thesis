@@ -14,14 +14,17 @@ Raw uncertain events
   -> TopKResult per query
 ```
 
-For the full streaming-style demo, the ingress path is also Spark-based:
+For the finite streaming benchmark, ingress is handled by Spark Structured Streaming:
 
 ```text
 Python simulator -> EMQX MQTT -> EMQX Kafka sink -> Kafka
-  -> Apache Spark bounded Kafka reader
+  -> Apache Spark Structured Streaming (AvailableNow bounded snapshot)
   -> SparkTopKEngine
   -> TopKResult
 ```
+
+The bounded snapshot is intentional: each saved PTD benchmark evaluates one fixed set of
+uncertain events. It avoids comparing algorithms against different moving stream contents.
 
 Legacy Flink source files are retained only for comparison. The default build image, Docker Compose services, Kubernetes manifest, E2E scripts, validation scripts, and monitor now target Spark.
 
@@ -31,6 +34,12 @@ Legacy Flink source files are retained only for comparison. The default build im
 just
 just test
 just spark
+just csv-test
+just stream-test
+just compare-runs csv-run-a csv-run-b
+just web
+just web-test
+just web-smoke-test
 just image
 just setup
 just spark-submit
@@ -99,6 +108,9 @@ reports/e2e/spark.log
 reports/e2e/spark-submit.log
 ```
 
+The E2E profile now uses Spark's Kafka Structured Streaming source rather than a driver-side
+Kafka consumer. It requires the `spark-sql-kafka-0-10_2.12` connector packaged with the app.
+
 ## Kubernetes
 
 Build the image and make it available to your cluster, then apply the manifest:
@@ -149,6 +161,91 @@ objectId,queryId,eventTime,opType,a0,a1,a2,...
 Missing values can be blank, `null`, `NaN`, or `?`. `opType` may be blank and defaults to `UPSERT`.
 
 For Docker/Kubernetes runs, `DATASET_PATH` must be visible inside the container. The Spark image looks under `/opt/spark/datasets-raw` for baked-in raw datasets.
+
+## Research Test Profiles And Saved Runs
+
+Run the deterministic CSV fixture through Spark and exactness validation:
+
+```bash
+RUN_ID=csv-baseline just csv-test
+```
+
+The fixture is `tests/fixtures/csv/smartphone-small.csv`. To exercise another normalized CSV:
+
+```bash
+RUN_ID=csv-custom CSV_PATH=/absolute/path/events.csv scripts/research/run_csv_benchmark.sh
+```
+
+Run the actual stream route with a finite reproducible workload:
+
+```bash
+RUN_ID=stream-baseline OBJECTS=12 QUERIES=2 DIMENSIONS=2 K=2 just stream-test
+```
+
+To keep a command-line validation run from updating the latest shared E2E
+snapshot files, direct its transient logs to another directory:
+
+```bash
+RUN_ID=stream-check E2E_REPORT_DIR=/tmp/ptd-stream-check \
+  BUILD_IMAGE=0 tests/e2e/test_mqtt_kafka_spark.sh
+python3 scripts/validate-e2e.py --report-dir /tmp/ptd-stream-check \
+  --expected-messages 24 --expected-queries 2
+```
+
+`just test-all` uses isolated temporary output automatically while still
+persisting immutable completed-run evidence under `reports/runs/<run-id>/`.
+
+## PTD-BenchLab Website
+
+Start the local research workbench:
+
+```bash
+just web
+```
+
+Open `http://127.0.0.1:8090`. Set another port with `WEB_PORT=8091 just web`.
+
+The dependency-free website is backed directly by the saved experiment evidence in
+`reports/runs/*`. It provides:
+
+- a dashboard for validated CSV and MQTT/Kafka/Spark runs;
+- click-through run details with configuration, per-query pruning, thresholds and logs;
+- fair-comparison warnings when seeds, partitions, dataset hashes or other controls differ;
+- CSV record inspection and input-quality summaries;
+- launch controls for the validated CSV and bounded streaming benchmark profiles;
+- exactness status, measured runtime/pruning charts, and downloadable evidence bundles.
+
+The site explicitly marks paper-faithful AES-only/DSCP-only ablations, spatial road
+simulation, per-object DDR/MBR traces and actual Spark shuffle-byte metrics as pending
+instrumentation; it does not present those claims from placeholder data.
+
+Validate both its artifact logic and its served HTTP endpoints from the terminal:
+
+```bash
+just web-test
+just web-smoke-test
+```
+
+Every profile produces an immutable run directory under `reports/runs/<run-id>/`:
+
+```text
+manifest.json       configuration, dataset SHA-256, commit and dirty-worktree state
+metrics.json        Spark/PTD metrics, algorithm time, validation time, correctness status
+metrics.csv         query-level export for later analysis
+spark.log           execution evidence
+algorithm.log       CSV profile exact-vs-pruned validation evidence
+e2e-summary.csv     stream profile ingress and elapsed-time evidence
+```
+
+Compare two saved setups:
+
+```bash
+just compare-runs csv-baseline csv-partitions-4
+```
+
+The comparison uses algorithm time excluding the optional oracle-check duration, and warns if
+fairness-critical setup fields differ, including dataset checksum, data shape, `k`, partition
+count, or seed.
 
 ## MQTT/Kafka Ingress
 

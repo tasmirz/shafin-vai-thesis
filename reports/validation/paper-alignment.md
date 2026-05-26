@@ -30,7 +30,7 @@ This repository implements that upgrade direction by using Apache Spark as the d
 The full runtime path is now:
 
 ```text
-PythonSimulator -> EMQX MQTT -> Kafka -> Apache Spark bounded Kafka reader -> SparkTopKEngine -> TopKResult
+PythonSimulator -> EMQX MQTT -> Kafka -> Apache Spark Structured Streaming bounded reader -> SparkTopKEngine -> TopKResult
 ```
 
 Validation commands:
@@ -69,20 +69,28 @@ This section outlines how the performance of the proposed framework (as presente
 
 ### 1. Actual Wall Clock Time (`act WC`)
 **Paper Definition:** `act WC = T_filter + T_refine`, averaged over queries.
-**Framework Mapping:** 
+**Framework Mapping:**
 - `avgExactMs` logs map to the **Baseline** (`act WC`) without bounds.
-- `avgFastCandidateMs` logs map to the **Proposed** (`act WC`) utilizing AES + DSCP. 
-Our runtime algorithm benchmarks (e.g., `reports/algorithm/topk-200x2.txt`) demonstrate analogous massive reductions matching the ~34.2% (Synthetic) and ~24.7% (Real) reported in the paper tables. We validate overall pipeline overhead scaling via `total_ms` in `reports/e2e/summary.csv`.
+- `avgFastCandidateMs` logs are a candidate-pruning comparison metric; it is not yet a formal
+  AES+DSCP ablation result.
+Our runtime benchmark harness records comparable timing and pruning metrics, but it does not by
+itself reproduce the paper's reported percentages. Named CSV and stream profiles now persist
+configuration, logs, checksums where applicable, and exact-agreement evidence under
+`reports/runs/<run-id>/`.
 
 ### 2. Communication Cost (`act CC`)
 **Paper Definition:** `act CC = O(|S_cand| · |t| · |tj.list|)`, defining filtering mapper emission data payload sizes.
-**Framework Mapping:** 
-- Evaluated via `avgPartitionedShuffleWriteProxyBytes` capturing precisely the payload cardinality matching bound survival.
+**Framework Mapping:**
+- `avgPartitionedShuffleWriteProxyBytes` is currently a calculated candidate-payload proxy, not
+  an observed Spark shuffle byte counter.
 
 ### 3. Aggregated Emission Rate (`AER`) / Ablation
 **Paper Definition:** `AER = E_AES / E_baseline × 100`. Isolates DSCP candidate eliminations and AES grouped network packet compressions.
 **Framework Mapping:**
-- **AES only:** Monitored as the `avgPartitionedCommunicationReduction` fraction (e.g., 0.8 / 80% compression vs legacy mappings).
-- **DSCP only:** Reflected by `avgCertifiedPruneRatio` and `avgFastPruneRatio` directly modeling weak candidate eliminations (bounds evaluations) over full subsets.
+- DSCP behavior is exposed through candidate pruning ratios and thresholds.
+- Compact object-level Spark grouping is an AES analogue, but explicit `baseline`, `AES-only`,
+  `DSCP-only`, and `AES+DSCP` selectable runs remain required for paper-faithful ablation.
 
-By maintaining exact output equivalence (`fastPrecisionAtK = 1.000`), our framework strictly complies with the paper constraints.
+Validation-enabled Spark runs emit `validationPerformed=true exactAgreement=true` only after an
+oracle comparison; the attached local benchmark also records `topKAgreement`. These checks
+support exactness for the tested finite inputs without claiming full paper reproduction.

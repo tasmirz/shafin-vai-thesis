@@ -12,12 +12,14 @@ rate_per_second := env_var_or_default("RATE_PER_SECOND", "200")
 qos := env_var_or_default("QOS", "0")
 expected_messages := env_var_or_default("EXPECTED_MESSAGES", "400")
 monitor_port := env_var_or_default("PORT", "8088")
+web_port := env_var_or_default("WEB_PORT", "8090")
 dataset := env_var_or_default("DATASET", "synthetic")
 dataset_path := env_var_or_default("DATASET_PATH", "")
 partitions := env_var_or_default("PARTITIONS", "4")
 candidate_multiplier := env_var_or_default("CANDIDATE_MULTIPLIER", "4")
 synopsis_bins := env_var_or_default("SYNOPSIS_BINS", "8")
 max_events := env_var_or_default("MAX_EVENTS", "0")
+run_id := env_var_or_default("RUN_ID", "")
 
 # list available recipes
 default:
@@ -64,9 +66,10 @@ config-check:
 # run the Spark upgraded job locally
 spark:
     mkdir -p reports/spark
-    mvn -q -DskipTests package
-    docker build -t thesis-topk-spark:local . >/dev/null
-    docker run --rm \
+    report_path="${SPARK_REPORT_PATH:-reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt}"; \
+      mvn -q -DskipTests package && \
+      docker build -t thesis-topk-spark:local . >/dev/null && \
+      docker run --rm \
       -v $(pwd)/reports:/opt/spark/work-dir/reports \
       thesis-topk-spark:local \
       /opt/spark/bin/spark-submit \
@@ -74,8 +77,8 @@ spark:
       --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
       /opt/spark/app/topk-spark.jar \
       --source=simulator --dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --synopsisBins={{ synopsis_bins }} --sparkMaster=local[*] \
-      > reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
-    tail -n 12 reports/spark/topk-spark-{{ objects }}x{{ queries }}.txt
+      > "$report_path" && \
+      tail -n 12 "$report_path"
 
 # run the algorithm-only performance benchmark
 bench:
@@ -85,6 +88,31 @@ bench:
       -Dexec.args="--dataset={{ dataset }} --datasetPath={{ dataset_path }} --objects={{ objects }} --dimensions={{ dimensions }} --queries={{ queries }} --k={{ k }} --missingRate={{ missing_rate }} --seed=7 --partitions={{ partitions }} --candidateMultiplier={{ candidate_multiplier }} --synopsisBins={{ synopsis_bins }}" \
       > reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
     tail -n 8 reports/algorithm/topk-{{ objects }}x{{ queries }}.txt
+
+# run the deterministic CSV-to-Spark research integration profile and save its artifacts
+csv-test:
+    RUN_ID={{ run_id }} tests/integration/test_csv_spark.sh
+
+# run MQTT -> Kafka -> Spark Structured Streaming E2E and save its artifacts
+stream-test:
+    RUN_ID={{ run_id }} OBJECTS={{ objects }} QUERIES={{ queries }} DIMENSIONS={{ dimensions }} K={{ k }} \
+      PARTITIONS={{ partitions }} RATE_PER_SECOND={{ rate_per_second }} tests/e2e/test_mqtt_kafka_spark.sh
+
+# compare saved research runs: just compare-runs run-a run-b
+compare-runs first second:
+    python3 scripts/research/compare_runs.py {{ first }} {{ second }}
+
+# serve the PTD-BenchLab research workbench website
+web:
+    python3 web/server.py --port {{ web_port }}
+
+# validate website artifact parsing and comparison behavior
+web-test:
+    python3 -m unittest discover -s tests/web -p 'test_*.py'
+
+# exercise the local PTD-BenchLab website through HTTP from the CLI
+web-smoke-test:
+    tests/web/test_http.sh
 
 # run the simulator-backed Spark job on the local JVM
 run-local: spark
