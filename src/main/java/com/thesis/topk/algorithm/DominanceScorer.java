@@ -93,6 +93,33 @@ public final class DominanceScorer {
     return strictlyBetter;
   }
 
+  /**
+   * Conservative upper-bound predicate used while traversing a candidate aR-tree node.
+   * It tests whether any point in the candidate MBR could dominate any point in a competing MBR.
+   */
+  public static boolean mbrCouldDynamicallyDominateMbr(
+      double[] candidateMin,
+      double[] candidateMax,
+      double[] competitorMin,
+      double[] competitorMax,
+      QueryPoint queryPoint) {
+    double[] query = queryPoint.coordinates();
+    boolean strictlyBetter = false;
+    for (int d = 0; d < query.length; d++) {
+      double candidateBestDistance = minimumDistance(query[d], candidateMin[d], candidateMax[d]);
+      double competitorWorstDistance = Math.max(
+          Math.abs(competitorMin[d] - query[d]),
+          Math.abs(competitorMax[d] - query[d]));
+      if (candidateBestDistance > competitorWorstDistance) {
+        return false;
+      }
+      if (candidateBestDistance < competitorWorstDistance) {
+        strictlyBetter = true;
+      }
+    }
+    return strictlyBetter;
+  }
+
   private static double minimumDistance(double query, double lower, double upper) {
     if (query >= lower && query <= upper) {
       return 0.0;

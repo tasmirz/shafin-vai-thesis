@@ -34,6 +34,7 @@ public final class ProbabilisticTopKSparkJob {
     String source = parsed.stringValue("source", "simulator");
     String sparkMaster = parsed.stringValue("sparkMaster", "local[*]");
     boolean validateExact = parsed.booleanValue("validateExact", false);
+    int traceLimit = parsed.intValue("traceLimit", 25);
     PtdAlgorithm algorithm = PtdAlgorithmRegistry.require(
         parsed.stringValue("algorithm", PtdAlgorithmRegistry.DEFAULT_ID));
 
@@ -58,7 +59,8 @@ public final class ProbabilisticTopKSparkJob {
           k,
           partitions,
           algorithm,
-          validateExact);
+          validateExact,
+          traceLimit);
       printReport(dataset, source, k, partitions, algorithm, boundMode, synopsis, result,
           Duration.between(start, Instant.now()));
     }
@@ -124,12 +126,17 @@ public final class ProbabilisticTopKSparkJob {
       SparkTopKEngine.SparkRunResult result,
       Duration elapsed) {
     long validationMs = Duration.ofNanos(result.validationNanos()).toMillis();
-    long algorithmElapsedMs = Math.max(0L, elapsed.toMillis() - validationMs);
+    long algorithmElapsedMs = result.rankings().stream()
+        .mapToLong(ranking -> ranking.filteringNanos()
+            + ranking.emissionNanos()
+            + ranking.refinementNanos())
+        .sum() / 1_000_000L;
+    long setupMs = Math.max(0L, elapsed.toMillis() - validationMs - algorithmElapsedMs);
     System.out.printf(
         "engine=apache-spark source=%s dataset=%s k=%d partitions=%d elapsedMs=%d "
-            + "algorithmElapsedMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s "
+            + "algorithmElapsedMs=%d setupMs=%d validationMs=%d algorithm=%s dscp=%s aes=%s "
             + "boundMode=%s emissionScope=server-partition%n",
-        source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, validationMs,
+        source, dataset, k, partitions, elapsed.toMillis(), algorithmElapsedMs, setupMs, validationMs,
         algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled(), boundMode);
     System.out.printf("rawEvents=%d probabilisticInstances=%d synopsisRules=%d synopsisBins=%d%n",
         result.rawEventCount(),
@@ -159,7 +166,7 @@ public final class ProbabilisticTopKSparkJob {
           ranking.aggregatedEmissionRate(),
           ranking.falsePruneCount(),
           ranking.indexedMbrPath(),
-          ranking.baselineEmissions(),
+          ranking.partialMbrReferences(),
           Duration.ofNanos(ranking.filteringNanos()).toMillis(),
           Duration.ofNanos(ranking.emissionNanos()).toMillis(),
           Duration.ofNanos(ranking.refinementNanos()).toMillis(),
@@ -191,7 +198,7 @@ public final class ProbabilisticTopKSparkJob {
           ranking.aggregatedEmissionRate(),
           ranking.falsePruneCount(),
           ranking.indexedMbrPath(),
-          ranking.baselineEmissions(),
+          ranking.partialMbrReferences(),
           Duration.ofNanos(ranking.filteringNanos()).toMillis(),
           Duration.ofNanos(ranking.emissionNanos()).toMillis(),
           Duration.ofNanos(ranking.refinementNanos()).toMillis(),
@@ -210,6 +217,22 @@ public final class ProbabilisticTopKSparkJob {
             score.lowerBound(),
             score.upperBound(),
             score.instanceCount());
+      }
+      for (SparkTopKEngine.ObjectTrace trace : ranking.objectTraces()) {
+        System.out.printf(
+            "ObjectTrace{queryId=%s, objectId=%s, partition=%d, lb=%.6f, ub=%.6f, "
+                + "tau=%.6f, decision=%s, partialMbrRefs=%d, baselineEmissions=%d, "
+                + "aesEmissions=%d}%n",
+            trace.queryId(),
+            trace.objectId(),
+            trace.partitionId(),
+            trace.lowerBound(),
+            trace.upperBound(),
+            trace.tau(),
+            trace.decision(),
+            trace.partialMbrReferences(),
+            trace.baselineEmissions(),
+            trace.aesEmissions());
       }
     }
   }

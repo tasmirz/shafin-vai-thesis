@@ -5,6 +5,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -57,19 +58,24 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
   engine = dict(re.findall(r"(\w+)=([^\s]+)", engine_match.group(1))) if engine_match else {}
   count_match = re.search(r"^rawEvents=(\d+) probabilisticInstances=(\d+)", metric_log, re.MULTILINE)
   rankings = []
-  # Prefer comma-delimited result records: Spark WARN output can interleave with the compact
-  # query line when stdout and stderr are redirected into one experiment log.
-  result_lines = re.findall(r"^TopKResult\{engine=apache-spark, (.+?)\}$", metric_log, re.MULTILINE)
-  if result_lines:
+  trace_rows = []
+  # Prefer the compact record: it is emitted on one complete line after each presentation row,
+  # while Spark WARN output has occasionally split the longer TopKResult presentation record.
+  compact_lines = [
+      line for line in re.findall(r"^query=.+$", metric_log, re.MULTILINE)
+      if " algorithm=" in line and " objects=" in line
+  ]
+  if compact_lines:
+    rows = [
+        dict(re.findall(r"(\w+)=([^\s]+)", line))
+        for line in compact_lines
+    ]
+  else:
+    result_lines = re.findall(
+        r"^TopKResult\{engine=apache-spark, (.+?)\}$", metric_log, re.MULTILINE)
     rows = [
         dict(re.findall(r"(\w+)=([^,}]+)", line))
         for line in result_lines
-    ]
-  else:
-    rows = [
-        dict(re.findall(r"(\w+)=([^\s]+)", line))
-        for line in re.findall(r"^query=.+$", metric_log, re.MULTILINE)
-        if " algorithm=" in line and " objects=" in line
     ]
   for fields in rows:
     emitted = fields.get("emittedRecords", fields.get("compactShuffleRecords", "0"))
@@ -99,6 +105,21 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
         "gcMs": int(fields.get("gcMs", "0")),
         "stragglerRatio": float(fields.get("stragglerRatio", "0.0")),
     })
+  for line in re.findall(r"^ObjectTrace\{(.+?)\}$", metric_log, re.MULTILINE):
+    fields = dict(re.findall(r"(\w+)=([^,}]+)", line))
+    tau = float(fields["tau"])
+    trace_rows.append({
+        "queryId": fields.get("queryId"),
+        "objectId": fields.get("objectId"),
+        "partition": int(fields["partition"]),
+        "lb": float(fields["lb"]),
+        "ub": float(fields["ub"]),
+        "tau": None if math.isnan(tau) else tau,
+        "decision": fields["decision"],
+        "partialMbrRefs": int(fields["partialMbrRefs"]),
+        "baselineEmissions": int(fields["baselineEmissions"]),
+        "aesEmissions": int(fields["aesEmissions"]),
+    })
   agreement = re.findall(r"topKAgreement=(true|false)", algorithm_log)
   spark_agreement = re.findall(
       r"^query=.*validationPerformed=true exactAgreement=(true|false)", metric_log, re.MULTILINE)
@@ -119,6 +140,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
           "elapsedMs": int(engine["elapsedMs"]) if "elapsedMs" in engine else None,
           "algorithmElapsedMs": (
               int(engine["algorithmElapsedMs"]) if "algorithmElapsedMs" in engine else None),
+          "setupMs": int(engine["setupMs"]) if "setupMs" in engine else None,
           "validationMs": int(engine["validationMs"]) if "validationMs" in engine else None,
           "algorithm": engine.get("algorithm"),
           "dscpEnabled": engine.get("dscp") == "true" if "dscp" in engine else None,
@@ -146,6 +168,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
           "totalExecutorRunMs": sum(row["executorRunMs"] for row in rankings),
           "totalGcMs": sum(row["gcMs"] for row in rankings),
           "maxStragglerRatio": max((row["stragglerRatio"] for row in rankings), default=0.0),
+          "objectTraces": trace_rows,
       },
       "validation": {
           "queriesChecked": len(all_agreement),
@@ -244,6 +267,16 @@ def main():
           "validation_ms": metrics["spark"]["validationMs"],
           "exact_topk_agreement": metrics["validation"]["exactTopKAgreement"],
       })
+  traces = metrics["spark"].get("objectTraces", [])
+  if traces:
+    with (run_dir / "object-traces.csv").open("w", newline="") as target:
+      writer = csv.DictWriter(target, fieldnames=[
+          "queryId", "objectId", "partition", "lb", "ub", "tau", "decision",
+          "partialMbrRefs", "baselineEmissions", "aesEmissions"])
+      writer.writeheader()
+      writer.writerows(traces)
+    manifest["artifacts"].append("object-traces.csv")
+    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
   print(f"savedRun={run_dir.relative_to(ROOT)}")
 
 

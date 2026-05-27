@@ -13,6 +13,8 @@ REQUIRE_EXACT="${REQUIRE_EXACT:-$VALIDATE_EXACT}"
 REQUIRE_PRUNING="${REQUIRE_PRUNING:-true}"
 REUSE_EXISTING_RUNS="${REUSE_EXISTING_RUNS:-false}"
 SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-2g}"
+SPARK_MASTER="${SPARK_MASTER:-local[4]}"
+TRACE_LIMIT="${TRACE_LIMIT:-25}"
 VARIANTS=(baseline dscp-only aes-only aes-dscp)
 RUNS=()
 
@@ -34,6 +36,8 @@ for variant in "${VARIANTS[@]}"; do
     DATASET_MANIFEST="$DATASET_MANIFEST" K="$K" PARTITIONS="$PARTITIONS" \
     VALIDATE_EXACT="$VALIDATE_EXACT" RUN_LOCAL_ORACLE="$VALIDATE_EXACT" BUILD_IMAGE="$BUILD_IMAGE" \
     SPARK_DRIVER_MEMORY="$SPARK_DRIVER_MEMORY" \
+    SPARK_MASTER="$SPARK_MASTER" \
+    TRACE_LIMIT="$TRACE_LIMIT" \
     scripts/research/run_csv_benchmark.sh
   BUILD_IMAGE=0
 done
@@ -61,14 +65,19 @@ indexed = all(
 if indexed:
     assert baseline["totalEmittedRecords"] >= aes["totalEmittedRecords"], "AES increased emissions"
     assert dscp["totalEmittedRecords"] >= full["totalEmittedRecords"], "AES increased DSCP emissions"
+    assert baseline["avgPruneRatio"] == aes["avgPruneRatio"], (
+        "AES changed Rai-Lian baseline candidate selection")
+    assert dscp["avgPruneRatio"] >= baseline["avgPruneRatio"], (
+        "DSCP retained more candidates than the indexed baseline")
 else:
     assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
     assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
-assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
+    assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
 assert dscp["avgPruneRatio"] == full["avgPruneRatio"], "AES changed DSCP candidate selection"
 assert dscp["totalBaselineEmissions"] == full["totalBaselineEmissions"], "AES changed DSCP baseline scope"
 if sys.argv[2].lower() in ("1", "true"):
-    assert dscp["falsePruneCount"] == 0 and full["falsePruneCount"] == 0, "DSCP false prune detected"
+    assert all(result["falsePruneCount"] == 0 for result in metrics.values()), (
+        "indexed or DSCP treatment false prune detected")
 if sys.argv[3].lower() in ("1", "true") and all(result.get("boundMode") in {
         "ddr-mbr-full-possible",
         "rai-lian-artree-selected-level-partial-reducer",

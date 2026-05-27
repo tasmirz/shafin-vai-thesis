@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="690" height="430" viewBox="0 0 690 430">
+<rect width="100%" height="100%" fill="white"/>
+<text x="345.0" y="24" text-anchor="middle" font-family="Georgia, serif" font-size="16">Ablation Study on Synthetic Dataset</text>
+<text x="345.0" y="45" text-anchor="middle" font-family="Arial, sans-serif" fill="#555" font-size="11">Measured Spark execution; same-machine treatments</text>
+<line x1="76" y1="354.0" x2="654" y2="354.0" stroke="#d8d8d8" stroke-dasharray="3 3"/>
+<text x="68" y="358.0" text-anchor="end" font-family="Arial, sans-serif" font-size="10">0</text>
+<line x1="76" y1="281.0" x2="654" y2="281.0" stroke="#d8d8d8" stroke-dasharray="3 3"/>
+<text x="68" y="285.0" text-anchor="end" font-family="Arial, sans-serif" font-size="10">12,124</text>
+<line x1="76" y1="208.0" x2="654" y2="208.0" stroke="#d8d8d8" stroke-dasharray="3 3"/>
+<text x="68" y="212.0" text-anchor="end" font-family="Arial, sans-serif" font-size="10">24,249</text>
+<line x1="76" y1="135.0" x2="654" y2="135.0" stroke="#d8d8d8" stroke-dasharray="3 3"/>
+<text x="68" y="139.0" text-anchor="end" font-family="Arial, sans-serif" font-size="10">36,374</text>
+<line x1="76" y1="62.0" x2="654" y2="62.0" stroke="#d8d8d8" stroke-dasharray="3 3"/>
+<text x="68" y="66.0" text-anchor="end" font-family="Arial, sans-serif" font-size="10">48,499</text>
+<line x1="76" y1="62" x2="76" y2="354" stroke="#222"/>
+<line x1="76" y1="354" x2="654" y2="354" stroke="#222"/>
+<text x="18" y="208.0" transform="rotate(-90 18 208.0)" text-anchor="middle" font-family="Georgia, serif" font-size="12">Avg Wall Clock Time (ms)</text>
+<rect x="118.0" y="102.3" width="92" height="251.7" fill="#fefefe" stroke="#222" stroke-width="1.5"/>
+<text x="164.0" y="94.3" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">41,800</text>
+<text x="164.0" y="375" text-anchor="middle" font-family="Georgia, serif" font-size="12">Baseline</text>
+<rect x="252.0" y="130.9" width="92" height="223.1" fill="#d3d3d3" stroke="#222" stroke-width="1.5"/>
+<text x="298.0" y="122.9" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">37,050</text>
+<text x="298.0" y="375" text-anchor="middle" font-family="Georgia, serif" font-size="12">AES-only</text>
+<text x="298.0" y="148.9" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">11.4%</text>
+<rect x="386.0" y="93.3" width="92" height="260.7" fill="#919191" stroke="#222" stroke-width="1.5"/>
+<text x="432.0" y="85.3" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">43,303</text>
+<text x="432.0" y="375" text-anchor="middle" font-family="Georgia, serif" font-size="12">DSCP-only</text>
+<text x="432.0" y="111.3" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">-3.6%</text>
+<rect x="520.0" y="134.1" width="92" height="219.9" fill="#525252" stroke="#222" stroke-width="1.5"/>
+<text x="566.0" y="126.1" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">36,527</text>
+<text x="566.0" y="375" text-anchor="middle" font-family="Georgia, serif" font-size="12">Proposed</text>
+<text x="566.0" y="152.1" text-anchor="middle" font-family="Arial, sans-serif" font-size="10">12.6%</text>
+</svg>

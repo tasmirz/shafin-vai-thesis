@@ -6,5 +6,6 @@ target/*
 .venv
 datasets-osm
 datasets-curated
+datasets-raw
 reports/runs
 reports/datasets

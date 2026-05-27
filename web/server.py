@@ -34,6 +34,7 @@ JOB_ROOT = ROOT / "reports" / "web-jobs"
 CSV_FIXTURE = ROOT / "tests" / "fixtures" / "csv" / "smartphone-small.csv"
 DATASET_ROOT = ROOT / "datasets-curated"
 DATASET_MANIFEST_ROOT = ROOT / "reports" / "datasets"
+FIGURE_ROOT = ROOT / "reports" / "figures"
 OSM_PROTOCOL = ROOT / "config" / "research" / "bangladesh-osm-replication.json"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ALGORITHMS = ("baseline", "dscp-only", "aes-only", "aes-dscp")
@@ -65,6 +66,7 @@ FAIR_FIELDS = (
     ("parameters.k", "k"),
     ("parameters.partitions", "Partitions"),
     ("parameters.seed", "Seed"),
+    ("parameters.sparkDriverMemory", "Spark driver memory"),
 )
 
 
@@ -357,6 +359,15 @@ def latex_report(ids: list[str]) -> str:
   return "\n".join(lines)
 
 
+def paper_figures() -> list[dict]:
+  if not FIGURE_ROOT.exists():
+    return []
+  return [
+      {"name": path.name, "url": f"/api/reports/figures/{path.name}"}
+      for path in sorted(FIGURE_ROOT.glob("*.svg"))
+  ]
+
+
 def dashboard() -> dict:
   runs = list_runs()
   exact_runs = [item for item in runs if item["summary"]["exactAgreement"] is True]
@@ -402,10 +413,12 @@ def dashboard() -> dict:
               "Paper-shaped smartphone and Bangladesh road MBR dataset builders",
               "Probability normalization and MBR containment audit",
               "Observed Spark shuffle bytes, phase time and skew metrics",
+              "Per-object bounded DDR/MBR/AES trace artifact export",
+              "Heap-ordered aggregate-R-tree candidate traversal with indexed false-prune audit",
           ],
           "pending": [
-              "Per-object DDR/MBR and AES trace records",
               "Full published-scale benchmark execution and paper-number reproduction",
+              "Same-machine Hadoop execution matrix against Spark treatments",
           ],
       },
   }
@@ -621,6 +634,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Disposition", 'attachment; filename="ptd-results.tex"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+      elif request.path == "/api/reports/figures":
+        self.send_json({"figures": paper_figures()})
+      elif request.path.startswith("/api/reports/figures/"):
+        name = Path(unquote(request.path.split("/")[-1])).name
+        path = FIGURE_ROOT / name
+        if path.suffix != ".svg" or not path.is_file():
+          raise FileNotFoundError("Unknown paper figure.")
+        body = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/svg+xml")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

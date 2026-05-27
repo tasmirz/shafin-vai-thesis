@@ -44,6 +44,18 @@ class DominanceScorerTest {
         overlapping, new double[] {0.2, 0.2}, new double[] {0.4, 0.4}, query)).isTrue();
   }
 
+  @Test
+  void computesConservativeCandidateMbrUpperBoundAgainstCompetitorMbr() {
+    QueryPoint query = new QueryPoint("q0", new double[] {0.0, 0.0});
+
+    assertThat(DominanceScorer.mbrCouldDynamicallyDominateMbr(
+        new double[] {0.05, 0.05}, new double[] {0.10, 0.10},
+        new double[] {0.20, 0.20}, new double[] {0.30, 0.30}, query)).isTrue();
+    assertThat(DominanceScorer.mbrCouldDynamicallyDominateMbr(
+        new double[] {0.40, 0.40}, new double[] {0.50, 0.50},
+        new double[] {0.05, 0.05}, new double[] {0.10, 0.10}, query)).isFalse();
+  }
+
   private static ProbabilisticInstance instance(String id, double probability, double x, double y) {
     return new ProbabilisticInstance(id, "q0", id + "#0", 1L, probability, new double[] {x, y});
   }

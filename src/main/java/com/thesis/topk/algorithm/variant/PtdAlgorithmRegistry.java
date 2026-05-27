@@ -45,7 +45,7 @@ public final class PtdAlgorithmRegistry {
         "Baseline distributed PTD",
         false,
         false,
-        "No AES and no DSCP; paper comparison control."));
+        "Rai-Lian aR-tree score-bound baseline without AES or DSCP extensions."));
     register(algorithms, new ConfiguredAlgorithm(
         "dscp-only",
         "DSCP-only",

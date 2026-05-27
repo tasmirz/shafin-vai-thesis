@@ -1,0 +1,43 @@
+{
+  "generatedUtc": "2026-05-27T07:37:19.742844+00:00",
+  "publishedReference": {
+    "smartphone": {
+      "baseline": 66520,
+      "aes-only": 44760,
+      "dscp-only": 58484,
+      "aes-dscp": 43757
+    },
+    "road-full": {
+      "baseline": 56274,
+      "aes-only": 42967,
+      "dscp-only": 46848,
+      "aes-dscp": 42366
+    },
+    "road-smoke": {
+      "baseline": 56274,
+      "aes-only": 42967,
+      "dscp-only": 46848,
+      "aes-dscp": 42366
+    }
+  },
+  "observed": {
+    "smartphone": {
+      "suite": "iccit-smartphone-str-20260527T073310Z",
+      "values": {
+        "baseline": 41800,
+        "aes-only": 37050,
+        "dscp-only": 43303,
+        "aes-dscp": 36527
+      }
+    },
+    "road-full": {
+      "suite": "iccit-road-full-str-20260527T073041Z",
+      "values": {
+        "baseline": 18034,
+        "aes-only": 13728,
+        "dscp-only": 14493,
+        "aes-dscp": 12062
+      }
+    }
+  }
+}

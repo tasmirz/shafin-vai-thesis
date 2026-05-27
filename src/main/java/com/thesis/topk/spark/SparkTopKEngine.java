@@ -79,25 +79,41 @@ public final class SparkTopKEngine {
       int partitions,
       PtdAlgorithm algorithm,
       boolean validateExact) {
+    return rank(sc, events, queryPoints, synopsis, k, partitions, algorithm, validateExact, 0);
+  }
+
+  public static SparkRunResult rank(
+      JavaSparkContext sc,
+      List<RawEvent> events,
+      Map<String, QueryPoint> queryPoints,
+      DdImputationSynopsis synopsis,
+      int k,
+      int partitions,
+      PtdAlgorithm algorithm,
+      boolean validateExact,
+      int traceLimit) {
     int targetPartitions = Math.max(1, partitions);
     SparkTaskMetrics observedMetrics = new SparkTaskMetrics();
     sc.sc().addSparkListener(observedMetrics);
     Broadcast<DdImputationSynopsis> synopsisBroadcast = sc.broadcast(synopsis);
 
-    JavaRDD<RawEvent> rawEvents = sc.parallelize(events, targetPartitions).cache();
+    int inputSlices = Math.max(
+        targetPartitions, Math.min(256, Math.max(1, (events.size() + 19_999) / 20_000)));
+    JavaRDD<RawEvent> rawEvents = sc.parallelize(events, inputSlices).cache();
     long rawEventCount = rawEvents.count();
 
     JavaRDD<ProbabilisticInstance> instances = rawEvents
         .filter(event -> event.opType() == OpType.UPSERT)
         .flatMap(event -> ImputationEngine.impute(event, synopsisBroadcast.value()).iterator())
         .repartition(targetPartitions)
-        .persist(StorageLevel.MEMORY_ONLY());
+        .persist(StorageLevel.MEMORY_AND_DISK_SER());
     long instanceCount = instances.count();
 
     List<QueryRanking> rankings = new ArrayList<>();
     for (QueryPoint queryPoint : queryPoints.values()) {
       rankings.add(rankQuery(
-          sc, instances, queryPoint, k, targetPartitions, algorithm, validateExact, observedMetrics));
+          sc, instances, queryPoint, k, targetPartitions, algorithm, validateExact,
+          Math.max(0, traceLimit), observedMetrics));
     }
 
     instances.unpersist();
@@ -114,26 +130,28 @@ public final class SparkTopKEngine {
       int partitions,
       PtdAlgorithm algorithm,
       boolean validateExact,
+      int traceLimit,
       SparkTaskMetrics observedMetrics) {
     JavaRDD<ProbabilisticInstance> queryInstances = allInstances
         .filter(instance -> instance.queryId().equals(queryPoint.queryId()))
-        .persist(StorageLevel.MEMORY_ONLY());
+        .persist(StorageLevel.MEMORY_AND_DISK_SER());
 
     long queryInstanceCount = queryInstances.count();
     if (queryInstanceCount == 0) {
       queryInstances.unpersist();
       return new QueryRanking(
           queryPoint.queryId(), algorithm.id(), algorithm.dscpEnabled(), algorithm.aesEnabled(),
-          new ArrayList<>(), 0, 0, 0, Double.NaN, 0L, 0L, 0L, 0L,
+          new ArrayList<>(), 0, 0, 0, Double.NaN, 0L, 0L, 0L, 0L, 0L,
           validateExact, true, 0L, 0L, 0L, 0L,
-          new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false);
+          new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false,
+          new ArrayList<>());
     }
 
     SparkTaskMetrics.Snapshot metricsBefore = observedMetrics.snapshot();
     JavaPairRDD<Integer, Iterable<ProbabilisticInstance>> groupedByPartition = queryInstances
         .mapToPair(instance -> new Tuple2<>(serverPartition(instance, partitions), instance))
         .groupByKey(partitions)
-        .persist(StorageLevel.MEMORY_ONLY());
+        .persist(StorageLevel.MEMORY_AND_DISK_SER());
     boolean indexedMbrPath = queryInstances.filter(instance -> !instance.hasMbr()).take(1).isEmpty();
     long filteringStart = System.nanoTime();
     List<ProbabilisticInstance> allForQuery = validateExact || !indexedMbrPath
@@ -143,74 +161,130 @@ public final class SparkTopKEngine {
         ? null
         : sc.broadcast(allForQuery);
     Broadcast<Map<Integer, AggregateRTree>> indexBroadcast = null;
+    Broadcast<Map<Integer, Map<Integer, Integer>>> levelBroadcast = null;
+    JavaPairRDD<Integer, AggregateRTree> reducerIndexes = null;
 
     JavaRDD<CandidateEnvelope> roughCandidates;
     if (indexedMbrPath) {
-      Map<Integer, AggregateRTree> indexes = groupedByPartition
+      reducerIndexes = groupedByPartition
           .mapToPair(tuple -> new Tuple2<>(
               tuple._1(), AggregateRTree.build(
                   tuple._1(), iterableToList(tuple._2()), AggregateRTree.DEFAULT_FANOUT)))
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
+      Map<Integer, AggregateRTree> indexes = reducerIndexes
+          .mapValues(AggregateRTree::summaryOnly)
           .collectAsMap();
       indexBroadcast = sc.broadcast(new HashMap<>(indexes));
       Broadcast<Map<Integer, AggregateRTree>> indexesBroadcast = indexBroadcast;
+      Map<Integer, Map<Integer, Integer>> selectedLevels = groupedByPartition
+          .mapToPair(tuple -> new Tuple2<>(
+              tuple._1(),
+              selectedExportLevels(
+                  tuple._1(), iterableToList(tuple._2()), queryPoint, indexesBroadcast.value())))
+          .collectAsMap();
+      levelBroadcast = sc.broadcast(new HashMap<>(selectedLevels));
+      Broadcast<Map<Integer, Map<Integer, Integer>>> levelsBroadcast = levelBroadcast;
       roughCandidates = groupedByPartition
-          .flatMap(tuple -> indexedPartitionEnvelopes(
-              tuple._1(), queryPoint, iterableToList(tuple._2()), indexesBroadcast.value()).iterator())
-          .persist(StorageLevel.MEMORY_ONLY());
+          .flatMap(tuple -> {
+            List<ProbabilisticInstance> localInstances = iterableToList(tuple._2());
+            Map<Integer, AggregateRTree> mapperIndexes =
+                new HashMap<>(indexesBroadcast.value());
+            mapperIndexes.put(tuple._1(), AggregateRTree.build(
+                tuple._1(), localInstances, AggregateRTree.DEFAULT_FANOUT));
+            return indexedPartitionEnvelopes(
+                tuple._1(), queryPoint, mapperIndexes,
+                levelsBroadcast.value().getOrDefault(tuple._1(), Map.of()), k).iterator();
+          })
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
     } else {
       Broadcast<List<ProbabilisticInstance>> instancesBroadcast = allBroadcast;
       roughCandidates = groupedByPartition
           .flatMap(tuple -> partitionEnvelopes(
               tuple._1(), queryPoint, iterableToList(tuple._2()), instancesBroadcast.value(), partitions).iterator())
-          .persist(StorageLevel.MEMORY_ONLY());
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
     }
 
     long objectCount = roughCandidates.count();
     double tau = Double.NaN;
+    Map<Integer, Double> thresholds = Map.of();
     Broadcast<Map<Integer, Double>> thresholdBroadcast = null;
-    JavaRDD<CandidateEnvelope> survivors = roughCandidates;
+    JavaRDD<CandidateEnvelope> survivors = indexedMbrPath
+        ? roughCandidates.filter(candidate -> !candidate.prePruned())
+        : roughCandidates;
     if (algorithm.dscpEnabled()) {
-      Map<Integer, Double> thresholds = roughCandidates
+      thresholds = roughCandidates
           .mapToPair(candidate -> new Tuple2<>(candidate.partitionId(), candidate.lowerBound()))
           .groupByKey(partitions)
           .mapValues(values -> kthLowerBound(iterableToList(values), k))
           .collectAsMap();
-      tau = thresholds.values().stream().mapToDouble(Double::doubleValue).min().orElse(Double.NaN);
+      thresholds = new HashMap<>(thresholds);
+      double globalTau = kthLowerBound(
+          roughCandidates
+              .filter(candidate -> !candidate.prePruned())
+              .map(CandidateEnvelope::lowerBound)
+              .collect(),
+          k);
+      thresholds.replaceAll((partitionId, localTau) -> Math.max(localTau, globalTau));
+      tau = globalTau;
       thresholdBroadcast = sc.broadcast(new HashMap<>(thresholds));
       Broadcast<Map<Integer, Double>> thresholdsBroadcast = thresholdBroadcast;
       survivors = roughCandidates.filter(
-          candidate -> candidate.upperBound() >= thresholdsBroadcast.value().get(candidate.partitionId()));
+          candidate -> !candidate.prePruned()
+              && candidate.upperBound() >= thresholdsBroadcast.value().get(candidate.partitionId()));
     }
-    survivors = survivors.persist(StorageLevel.MEMORY_ONLY());
+    survivors = survivors.persist(StorageLevel.MEMORY_AND_DISK_SER());
 
     long refinedCount = survivors.count();
+    List<ObjectTrace> objectTraces = objectTraces(
+        roughCandidates, queryPoint, algorithm, thresholds, traceLimit);
     long filteringNanos = System.nanoTime() - filteringStart;
     long baselineEmissions = survivors.map(CandidateEnvelope::baselineEmissions).fold(0L, Long::sum);
     long aesEmissions = survivors.map(CandidateEnvelope::aesEmissions).fold(0L, Long::sum);
+    long partialMbrReferences = survivors.map(CandidateEnvelope::partialMbrReferenceCount)
+        .fold(0L, Long::sum);
+    roughCandidates.unpersist();
+    groupedByPartition.unpersist();
+    if (!validateExact) {
+      queryInstances.unpersist();
+    }
     long emissionStart = System.nanoTime();
     JavaPairRDD<String, String> emissions = null;
     JavaPairRDD<Integer, PartialMbrWork> partialEmissions = null;
     long emittedRecords;
     Broadcast<Map<String, Double>> partialScoresBroadcast = null;
     if (indexedMbrPath) {
-      partialEmissions = survivors
-          .flatMapToPair(candidate -> emitPartialMbrRecords(candidate, algorithm).iterator())
-          .partitionBy(new HashPartitioner(partitions))
-          .persist(StorageLevel.MEMORY_ONLY());
-      emittedRecords = partialEmissions.count();
       Broadcast<Map<Integer, AggregateRTree>> indexesBroadcast = indexBroadcast;
-      Map<String, Double> partialScores = partialEmissions
+      Broadcast<Map<Integer, Map<Integer, Integer>>> levelsBroadcast = levelBroadcast;
+      partialEmissions = survivors
+          .flatMapToPair(candidate -> emitPartialMbrRecords(
+              candidate,
+              queryPoint,
+              algorithm,
+              indexesBroadcast.value(),
+              levelsBroadcast.value().getOrDefault(candidate.partitionId(), Map.of())).iterator())
+          .partitionBy(new HashPartitioner(partitions));
+      Map<String, PartialScore> scoredPartials = partialEmissions.join(reducerIndexes)
           .mapToPair(tuple -> new Tuple2<>(
-              tuple._2().objectId(),
-              tuple._2().exactContribution(indexesBroadcast.value().get(tuple._1()), queryPoint)))
-          .reduceByKey(Double::sum)
+              tuple._2()._1().objectId(),
+              new PartialScore(
+                  tuple._2()._1().exactContribution(tuple._2()._2(), queryPoint), 1L)))
+          .reduceByKey(PartialScore::add)
           .collectAsMap();
+      emittedRecords = scoredPartials.values().stream()
+          .mapToLong(PartialScore::emittedRecords)
+          .sum();
+      Map<String, Double> partialScores = scoredPartials.entrySet().stream()
+          .collect(Collectors.toMap(
+              Map.Entry::getKey,
+              entry -> entry.getValue().exactContribution(),
+              Double::sum,
+              LinkedHashMap::new));
       partialScoresBroadcast = sc.broadcast(new HashMap<>(partialScores));
     } else {
       emissions = survivors
           .flatMapToPair(candidate -> emitRecords(candidate, algorithm).iterator())
           .partitionBy(new HashPartitioner(partitions))
-          .persist(StorageLevel.MEMORY_ONLY());
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
       emittedRecords = emissions.count();
     }
     long emissionNanos = System.nanoTime() - emissionStart;
@@ -228,7 +302,7 @@ public final class SparkTopKEngine {
               candidate.lowerBound(),
               candidate.upperBound(),
               candidate.instances().size()))
-          .persist(StorageLevel.MEMORY_ONLY());
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
     } else {
       Broadcast<List<ProbabilisticInstance>> instancesBroadcast = allBroadcast;
       refined = survivors
@@ -243,7 +317,7 @@ public final class SparkTopKEngine {
                 candidate.upperBound(),
                 candidate.instances().size());
           })
-          .persist(StorageLevel.MEMORY_ONLY());
+          .persist(StorageLevel.MEMORY_AND_DISK_SER());
     }
 
     refined.count();
@@ -258,7 +332,7 @@ public final class SparkTopKEngine {
           .map(CandidateScore::objectId)
           .toList();
       exactAgreement = topK.stream().map(CandidateScore::objectId).toList().equals(exactIds);
-      if (algorithm.dscpEnabled()) {
+      if (indexedMbrPath || algorithm.dscpEnabled()) {
         List<String> survivorIds = survivors.map(CandidateEnvelope::objectId).collect();
         falsePruneCount = exactIds.stream().filter(id -> !survivorIds.contains(id)).count();
       }
@@ -275,9 +349,9 @@ public final class SparkTopKEngine {
       partialEmissions.unpersist();
     }
     survivors.unpersist();
-    roughCandidates.unpersist();
-    groupedByPartition.unpersist();
-    queryInstances.unpersist();
+    if (validateExact) {
+      queryInstances.unpersist();
+    }
     if (thresholdBroadcast != null) {
       thresholdBroadcast.destroy();
     }
@@ -286,6 +360,12 @@ public final class SparkTopKEngine {
     }
     if (indexBroadcast != null) {
       indexBroadcast.destroy();
+    }
+    if (levelBroadcast != null) {
+      levelBroadcast.destroy();
+    }
+    if (reducerIndexes != null) {
+      reducerIndexes.unpersist();
     }
     if (allBroadcast != null) {
       allBroadcast.destroy();
@@ -305,6 +385,7 @@ public final class SparkTopKEngine {
         emittedRecords,
         baselineEmissions,
         aesEmissions,
+        partialMbrReferences,
         falsePruneCount,
         validateExact,
         exactAgreement,
@@ -313,55 +394,106 @@ public final class SparkTopKEngine {
         emissionNanos,
         refinementNanos,
         observed,
-        indexedMbrPath);
+        indexedMbrPath,
+        objectTraces);
+  }
+
+  private static List<ObjectTrace> objectTraces(
+      JavaRDD<CandidateEnvelope> roughCandidates,
+      QueryPoint queryPoint,
+      PtdAlgorithm algorithm,
+      Map<Integer, Double> thresholds,
+      int traceLimit) {
+    if (traceLimit <= 0) {
+      return new ArrayList<>();
+    }
+    return roughCandidates.take(traceLimit).stream()
+        .map(candidate -> {
+          double threshold = thresholds.getOrDefault(candidate.partitionId(), Double.NaN);
+          boolean pruned = candidate.prePruned()
+              || (algorithm.dscpEnabled() && candidate.upperBound() < threshold);
+          return new ObjectTrace(
+              queryPoint.queryId(),
+              candidate.objectId(),
+              candidate.partitionId(),
+              candidate.lowerBound(),
+              candidate.upperBound(),
+              threshold,
+              candidate.prePruned() ? "pruned-by-index" : pruned ? "pruned-by-dscp" : "survived",
+              candidate.partialMbrReferenceCount(),
+              candidate.baselineEmissions(),
+              candidate.aesEmissions());
+        })
+        .toList();
   }
 
   private static List<CandidateEnvelope> indexedPartitionEnvelopes(
       int partitionId,
       QueryPoint queryPoint,
-      List<ProbabilisticInstance> localInstances,
-      Map<Integer, AggregateRTree> indexes) {
-    Map<String, List<ProbabilisticInstance>> localObjects = localInstances.stream()
-        .collect(Collectors.groupingBy(
-            ProbabilisticInstance::objectId, LinkedHashMap::new, Collectors.toList()));
-    Map<Integer, LevelSelection> exportedLevels = new HashMap<>();
+      Map<Integer, AggregateRTree> indexes,
+      Map<Integer, Integer> exportedLevels,
+      int k) {
     AggregateRTree localIndex = indexes.get(partitionId);
     if (localIndex == null) {
       throw new IllegalArgumentException("No local aR-tree for partition " + partitionId);
     }
-    for (Map.Entry<Integer, AggregateRTree> entry : indexes.entrySet()) {
-      if (entry.getKey() != partitionId) {
-        exportedLevels.put(
-            entry.getKey(), entry.getValue().selectExportLevel(localInstances, queryPoint));
+    List<CandidateEnvelope> envelopes = new ArrayList<>(localIndex.objectCount());
+    List<Double> lowerBounds = new ArrayList<>();
+    double[] threshold = {Double.NEGATIVE_INFINITY};
+    List<String> prePrunedIds = localIndex.visitBestFirstObjectCandidates(
+        indexes, queryPoint, object -> {
+      if (lowerBounds.size() >= k && object.traversalUpperBound() < threshold[0]) {
+        return false;
       }
-    }
-    List<CandidateEnvelope> envelopes = new ArrayList<>();
-    for (Map.Entry<String, List<ProbabilisticInstance>> entry : localObjects.entrySet()) {
       double lowerBound = 0.0;
       double upperBound = 0.0;
-      List<PartialMbrWork> partialWork = new ArrayList<>();
-      for (ProbabilisticInstance candidate : entry.getValue()) {
-        double localMass = localIndex.exactDominatedMass(candidate, queryPoint);
-        double instanceLower = localMass;
-        double instanceUpper = localMass;
-        for (Map.Entry<Integer, LevelSelection> selection : exportedLevels.entrySet()) {
+      long baselineEmissions = 0L;
+      long aesEmissions = 0L;
+      for (ProbabilisticInstance candidate : object.instances()) {
+        double instanceLower = 0.0;
+        double instanceUpper = 0.0;
+        for (Map.Entry<Integer, Integer> selection : exportedLevels.entrySet()) {
           Inspection inspection = indexes.get(selection.getKey())
-              .inspectAtLevel(candidate, queryPoint, selection.getValue().level());
+              .inspectAtLevel(candidate, queryPoint, selection.getValue());
           instanceLower += inspection.fullyDominatedMass();
           instanceUpper += inspection.fullyDominatedMass() + inspection.partialUpperMass();
           if (!inspection.partiallyDominatedNodes().isEmpty()) {
-            partialWork.add(new PartialMbrWork(
-                entry.getKey(), candidate, inspection.partiallyDominatedNodes()));
+            baselineEmissions += inspection.partiallyDominatedNodes().size();
+            aesEmissions++;
           }
         }
         lowerBound += candidate.probability() * instanceLower;
         upperBound += candidate.probability() * instanceUpper;
       }
       envelopes.add(new CandidateEnvelope(
-          partitionId, entry.getKey(), entry.getValue(), List.of(),
-          lowerBound, upperBound, partialWork));
+          partitionId, object.objectId(), object.instances(), List.of(),
+          lowerBound, upperBound, baselineEmissions, aesEmissions, baselineEmissions, false));
+      lowerBounds.add(lowerBound);
+      threshold[0] = kthLowerBound(lowerBounds, k);
+      return true;
+    });
+    for (String objectId : prePrunedIds) {
+      envelopes.add(CandidateEnvelope.prePruned(partitionId, objectId, threshold[0]));
     }
     return envelopes;
+  }
+
+  private static Map<Integer, Integer> selectedExportLevels(
+      int localPartitionId,
+      List<ProbabilisticInstance> localInstances,
+      QueryPoint queryPoint,
+      Map<Integer, AggregateRTree> indexes) {
+    Map<Integer, Integer> levels = new HashMap<>();
+    for (Map.Entry<Integer, AggregateRTree> entry : indexes.entrySet()) {
+      if (entry.getKey() == localPartitionId) {
+        // Mapper-local tree traversal is not an exported communication cost: retain tight LB.
+        levels.put(entry.getKey(), 0);
+      } else {
+        LevelSelection selected = entry.getValue().selectExportLevel(localInstances, queryPoint);
+        levels.put(entry.getKey(), selected.level());
+      }
+    }
+    return levels;
   }
 
   private static List<CandidateEnvelope> partitionEnvelopes(
@@ -395,7 +527,10 @@ public final class SparkTopKEngine {
           .sum();
       upperBound = lowerBound + objectMass * remoteMass;
       envelopes.add(new CandidateEnvelope(
-          partitionId, objectId, objectInstances, competitors, lowerBound, upperBound, List.of()));
+          partitionId, objectId, objectInstances, competitors, lowerBound, upperBound,
+          (long) objectInstances.size() * competitors.size(),
+          competitors.isEmpty() ? 0L : objectInstances.size(),
+          0L, false));
     }
     return envelopes;
   }
@@ -446,18 +581,29 @@ public final class SparkTopKEngine {
 
   private static List<Tuple2<Integer, PartialMbrWork>> emitPartialMbrRecords(
       CandidateEnvelope candidate,
-      PtdAlgorithm algorithm) {
+      QueryPoint queryPoint,
+      PtdAlgorithm algorithm,
+      Map<Integer, AggregateRTree> indexes,
+      Map<Integer, Integer> exportedLevels) {
     List<Tuple2<Integer, PartialMbrWork>> records = new ArrayList<>();
-    for (PartialMbrWork work : candidate.partialWork()) {
-      if (algorithm.aesEnabled()) {
-        records.add(new Tuple2<>(work.partitionId(), work));
-      } else {
-        for (NodeReference reference : work.references()) {
-          List<NodeReference> singleReference = new ArrayList<>();
-          singleReference.add(reference);
-          records.add(new Tuple2<>(
-              reference.partitionId(),
-              new PartialMbrWork(work.objectId(), work.candidate(), singleReference)));
+    for (ProbabilisticInstance instance : candidate.instances()) {
+      for (Map.Entry<Integer, Integer> selection : exportedLevels.entrySet()) {
+        Inspection inspection = indexes.get(selection.getKey())
+            .inspectAtLevel(instance, queryPoint, selection.getValue());
+        if (!inspection.partiallyDominatedNodes().isEmpty()) {
+          PartialMbrWork work = new PartialMbrWork(
+              candidate.objectId(), instance, inspection.partiallyDominatedNodes());
+          if (algorithm.aesEnabled()) {
+            records.add(new Tuple2<>(work.partitionId(), work));
+          } else {
+            for (NodeReference reference : work.references()) {
+              List<NodeReference> singleReference = new ArrayList<>();
+              singleReference.add(reference);
+              records.add(new Tuple2<>(
+                  reference.partitionId(),
+                  new PartialMbrWork(work.objectId(), work.candidate(), singleReference)));
+            }
+          }
         }
       }
     }
@@ -471,7 +617,10 @@ public final class SparkTopKEngine {
     private final List<String> competitorIds;
     private final double lowerBound;
     private final double upperBound;
-    private final List<PartialMbrWork> partialWork;
+    private final long baselineEmissions;
+    private final long aesEmissions;
+    private final long partialMbrReferences;
+    private final boolean prePruned;
 
     CandidateEnvelope(
         int partitionId,
@@ -480,14 +629,26 @@ public final class SparkTopKEngine {
         List<String> competitorIds,
         double lowerBound,
         double upperBound,
-        List<PartialMbrWork> partialWork) {
+        long baselineEmissions,
+        long aesEmissions,
+        long partialMbrReferences,
+        boolean prePruned) {
       this.partitionId = partitionId;
       this.objectId = objectId;
       this.instances = new ArrayList<>(instances);
       this.competitorIds = new ArrayList<>(competitorIds);
       this.lowerBound = lowerBound;
       this.upperBound = upperBound;
-      this.partialWork = new ArrayList<>(partialWork);
+      this.baselineEmissions = baselineEmissions;
+      this.aesEmissions = aesEmissions;
+      this.partialMbrReferences = partialMbrReferences;
+      this.prePruned = prePruned;
+    }
+
+    static CandidateEnvelope prePruned(int partitionId, String objectId, double upperBound) {
+      return new CandidateEnvelope(
+          partitionId, objectId, List.of(), List.of(), Double.NEGATIVE_INFINITY, upperBound,
+          0L, 0L, 0L, true);
     }
 
     int partitionId() { return partitionId; }
@@ -496,18 +657,15 @@ public final class SparkTopKEngine {
     List<String> competitorIds() { return competitorIds; }
     double lowerBound() { return lowerBound; }
     double upperBound() { return upperBound; }
-    List<PartialMbrWork> partialWork() { return partialWork; }
+    boolean prePruned() { return prePruned; }
     long baselineEmissions() {
-      if (!partialWork.isEmpty()) {
-        return partialWork.stream().mapToLong(work -> work.references().size()).sum();
-      }
-      return (long) instances.size() * competitorIds.size();
+      return baselineEmissions;
     }
     long aesEmissions() {
-      if (!partialWork.isEmpty()) {
-        return partialWork.size();
-      }
-      return competitorIds.isEmpty() ? 0L : instances.size();
+      return aesEmissions;
+    }
+    long partialMbrReferenceCount() {
+      return partialMbrReferences;
     }
   }
 
@@ -544,6 +702,34 @@ public final class SparkTopKEngine {
     }
   }
 
+  private static final class PartialScore implements Serializable {
+    private double exactContribution;
+    private long emittedRecords;
+
+    private PartialScore() {
+      // Required by Kryo when Spark materializes shuffled values.
+    }
+
+    private PartialScore(double exactContribution, long emittedRecords) {
+      this.exactContribution = exactContribution;
+      this.emittedRecords = emittedRecords;
+    }
+
+    private double exactContribution() {
+      return exactContribution;
+    }
+
+    private long emittedRecords() {
+      return emittedRecords;
+    }
+
+    private PartialScore add(PartialScore other) {
+      return new PartialScore(
+          exactContribution + other.exactContribution,
+          emittedRecords + other.emittedRecords);
+    }
+  }
+
   public static final class QueryRanking implements Serializable {
     private final String queryId;
     private final String algorithmId;
@@ -557,6 +743,7 @@ public final class SparkTopKEngine {
     private final long compactShuffleRecords;
     private final long baselineEmissions;
     private final long aesEmissions;
+    private final long partialMbrReferences;
     private final long falsePruneCount;
     private final boolean validationPerformed;
     private final boolean exactAgreement;
@@ -566,6 +753,7 @@ public final class SparkTopKEngine {
     private final long refinementNanos;
     private final SparkTaskMetrics.Snapshot observedMetrics;
     private final boolean indexedMbrPath;
+    private final List<ObjectTrace> objectTraces;
 
     public QueryRanking(
         String queryId,
@@ -592,8 +780,9 @@ public final class SparkTopKEngine {
         long validationNanos) {
       this(queryId, PtdAlgorithmRegistry.DEFAULT_ID, true, true, topK, objectCount, refinedCount,
           prunedCount, pruningThreshold, compactShuffleRecords, compactShuffleRecords,
-          compactShuffleRecords, 0L, validationPerformed, exactAgreement, validationNanos,
-          0L, 0L, 0L, new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false);
+          compactShuffleRecords, 0L, 0L, validationPerformed, exactAgreement, validationNanos,
+          0L, 0L, 0L, new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false,
+          new ArrayList<>());
     }
 
     public QueryRanking(
@@ -609,14 +798,17 @@ public final class SparkTopKEngine {
         long compactShuffleRecords,
         long baselineEmissions,
         long aesEmissions,
+        long partialMbrReferences,
         long falsePruneCount,
         boolean validationPerformed,
         boolean exactAgreement,
         long validationNanos) {
       this(queryId, algorithmId, dscpEnabled, aesEnabled, topK, objectCount, refinedCount,
           prunedCount, pruningThreshold, compactShuffleRecords, baselineEmissions, aesEmissions,
-          falsePruneCount, validationPerformed, exactAgreement, validationNanos, 0L, 0L, 0L,
-          new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false);
+          partialMbrReferences, falsePruneCount, validationPerformed, exactAgreement,
+          validationNanos, 0L, 0L, 0L,
+          new SparkTaskMetrics.Snapshot(0, 0, 0, 0, 0, 0, 0, 0), false,
+          new ArrayList<>());
     }
 
     public QueryRanking(
@@ -632,6 +824,7 @@ public final class SparkTopKEngine {
         long compactShuffleRecords,
         long baselineEmissions,
         long aesEmissions,
+        long partialMbrReferences,
         long falsePruneCount,
         boolean validationPerformed,
         boolean exactAgreement,
@@ -640,7 +833,8 @@ public final class SparkTopKEngine {
         long emissionNanos,
         long refinementNanos,
         SparkTaskMetrics.Snapshot observedMetrics,
-        boolean indexedMbrPath) {
+        boolean indexedMbrPath,
+        List<ObjectTrace> objectTraces) {
       this.queryId = queryId;
       this.algorithmId = algorithmId;
       this.dscpEnabled = dscpEnabled;
@@ -653,6 +847,7 @@ public final class SparkTopKEngine {
       this.compactShuffleRecords = compactShuffleRecords;
       this.baselineEmissions = baselineEmissions;
       this.aesEmissions = aesEmissions;
+      this.partialMbrReferences = partialMbrReferences;
       this.falsePruneCount = falsePruneCount;
       this.validationPerformed = validationPerformed;
       this.exactAgreement = exactAgreement;
@@ -662,6 +857,7 @@ public final class SparkTopKEngine {
       this.refinementNanos = refinementNanos;
       this.observedMetrics = observedMetrics;
       this.indexedMbrPath = indexedMbrPath;
+      this.objectTraces = new ArrayList<>(objectTraces);
     }
 
     public String queryId() { return queryId; }
@@ -677,6 +873,7 @@ public final class SparkTopKEngine {
     public long emittedRecords() { return compactShuffleRecords; }
     public long baselineEmissions() { return baselineEmissions; }
     public long aesEmissions() { return aesEmissions; }
+    public long partialMbrReferences() { return partialMbrReferences; }
     public long falsePruneCount() { return falsePruneCount; }
     public boolean validationPerformed() { return validationPerformed; }
     public boolean exactAgreement() { return exactAgreement; }
@@ -686,6 +883,7 @@ public final class SparkTopKEngine {
     public long refinementNanos() { return refinementNanos; }
     public SparkTaskMetrics.Snapshot observedMetrics() { return observedMetrics; }
     public boolean indexedMbrPath() { return indexedMbrPath; }
+    public List<ObjectTrace> objectTraces() { return objectTraces; }
 
     public double pruneRatio() {
       return objectCount == 0L ? 0.0 : (double) prunedCount / objectCount;
@@ -694,6 +892,53 @@ public final class SparkTopKEngine {
     public double aggregatedEmissionRate() {
       return baselineEmissions == 0L ? 0.0 : (double) aesEmissions / baselineEmissions;
     }
+  }
+
+  public static final class ObjectTrace implements Serializable {
+    private final String queryId;
+    private final String objectId;
+    private final int partitionId;
+    private final double lowerBound;
+    private final double upperBound;
+    private final double tau;
+    private final String decision;
+    private final long partialMbrReferences;
+    private final long baselineEmissions;
+    private final long aesEmissions;
+
+    ObjectTrace(
+        String queryId,
+        String objectId,
+        int partitionId,
+        double lowerBound,
+        double upperBound,
+        double tau,
+        String decision,
+        long partialMbrReferences,
+        long baselineEmissions,
+        long aesEmissions) {
+      this.queryId = queryId;
+      this.objectId = objectId;
+      this.partitionId = partitionId;
+      this.lowerBound = lowerBound;
+      this.upperBound = upperBound;
+      this.tau = tau;
+      this.decision = decision;
+      this.partialMbrReferences = partialMbrReferences;
+      this.baselineEmissions = baselineEmissions;
+      this.aesEmissions = aesEmissions;
+    }
+
+    public String queryId() { return queryId; }
+    public String objectId() { return objectId; }
+    public int partitionId() { return partitionId; }
+    public double lowerBound() { return lowerBound; }
+    public double upperBound() { return upperBound; }
+    public double tau() { return tau; }
+    public String decision() { return decision; }
+    public long partialMbrReferences() { return partialMbrReferences; }
+    public long baselineEmissions() { return baselineEmissions; }
+    public long aesEmissions() { return aesEmissions; }
   }
 
   public static final class SparkRunResult implements Serializable {

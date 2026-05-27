@@ -1,6 +1,7 @@
 set dotenv-load
 
 compose_file := "docker-compose.e2e.yml"
+hadoop_compose_file := "docker-compose.hadoop.yml"
 image := "thesis-topk-spark:local"
 simulator_image := "thesis-simulator:local"
 objects := env_var_or_default("OBJECTS", "200")
@@ -62,7 +63,12 @@ image-check: image
 # validate docker compose and Kubernetes manifests
 config-check:
     docker compose -f {{ compose_file }} config >/dev/null
+    docker compose -f {{ hadoop_compose_file }} config >/dev/null
     python3 -c 'from pathlib import Path; import yaml; docs=[doc for doc in yaml.safe_load_all(Path("k8s/pipeline.yaml").read_text()) if doc]; assert docs, "k8s/pipeline.yaml contains no resources"; names=[doc.get("metadata",{}).get("name","") for doc in docs]; assert "spark-master" in names and "spark-topk-submit" in names; print(f"k8s resources: {len(docs)}")'
+
+# validate isolated HDFS/YARN MapReduce infrastructure; not a PTD algorithm benchmark
+hadoop-smoke:
+    scripts/research/validate_hadoop_cluster.sh
 
 # run the Spark upgraded job locally
 spark:
@@ -72,6 +78,7 @@ spark:
       docker build -t thesis-topk-spark:local . >/dev/null && \
       docker run --rm \
       -v $(pwd)/reports:/opt/spark/work-dir/reports \
+      -v $(pwd)/datasets-raw:/opt/spark/datasets-raw:ro \
       thesis-topk-spark:local \
       /opt/spark/bin/spark-submit \
       --master "local[*]" \
@@ -103,6 +110,10 @@ iccit-compare:
     PROFILE="${PROFILE:-smartphone}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \
       VALIDATE_EXACT="${VALIDATE_EXACT:-false}" BUILD_IMAGE="${BUILD_IMAGE:-1}" \
       scripts/research/run_iccit_comparison_suite.sh
+
+# render ICCIT-shaped observed Spark figures from completed smartphone and road suites
+paper-figures smartphone_suite road_suite:
+    python3 scripts/research/render_paper_figures.py --smartphone-suite {{ smartphone_suite }} --road-suite {{ road_suite }}
 
 # validate locally supplied Bangladesh OSM roads against the paper curation protocol
 osm-prepare-check:
@@ -165,6 +176,7 @@ run-kafka-local:
     docker build -t thesis-topk-spark:local . >/dev/null
     docker run --rm \
       --net=host \
+      -v $(pwd)/datasets-raw:/opt/spark/datasets-raw:ro \
       thesis-topk-spark:local \
       /opt/spark/bin/spark-submit \
       --master "local[*]" \

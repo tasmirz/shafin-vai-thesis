@@ -6,6 +6,7 @@ import com.thesis.topk.model.RawEvent;
 import com.thesis.topk.simulator.Args;
 import com.thesis.topk.simulator.SimulationConfig;
 import com.thesis.topk.simulator.SimulationData;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,65 +37,70 @@ public final class CsvDatasetProvider implements DatasetProvider {
   }
 
   private SimulationData readEvents(Path path, SimulationConfig config) throws IOException {
-    List<String> lines = Files.readAllLines(path);
-    if (lines.isEmpty()) {
-      throw new IllegalArgumentException("csv dataset is empty: " + path);
-    }
-    String[] header = split(lines.get(0));
-    int objectId = requiredColumn(header, "objectId");
-    int instanceId = optionalColumn(header, "instanceId");
-    int queryId = requiredColumn(header, "queryId");
-    int eventTime = requiredColumn(header, "eventTime");
-    int opType = optionalColumn(header, "opType");
-    int probability = optionalColumn(header, "probability");
-    int serverId = optionalColumn(header, "serverId");
-    List<Integer> attributeColumns = attributeColumns(header);
-    List<Integer> queryAttributeColumns = queryAttributeColumns(header, attributeColumns.size());
-    List<Integer> mbrMinColumns = coordinateColumns(header, "mbrMin", attributeColumns.size());
-    List<Integer> mbrMaxColumns = coordinateColumns(header, "mbrMax", attributeColumns.size());
-    if (mbrMinColumns.isEmpty() != mbrMaxColumns.isEmpty()) {
-      throw new IllegalArgumentException("csv dataset must provide both mbrMin and mbrMax columns");
-    }
-    if (attributeColumns.isEmpty()) {
-      throw new IllegalArgumentException("csv dataset must contain attribute columns after opType or named a0,a1,...");
-    }
-
     List<RawEvent> events = new ArrayList<>();
     Map<String, QueryPoint> queryPoints = new LinkedHashMap<>();
-    for (int row = 1; row < lines.size(); row++) {
-      String line = lines.get(row).trim();
-      if (line.isEmpty() || line.startsWith("#")) {
-        continue;
+    int dimensions;
+    try (BufferedReader reader = Files.newBufferedReader(path)) {
+      String headerLine = reader.readLine();
+      if (headerLine == null) {
+        throw new IllegalArgumentException("csv dataset is empty: " + path);
       }
-      String[] cells = split(line);
-      double[] attributes = new double[attributeColumns.size()];
-      boolean[] missing = new boolean[attributeColumns.size()];
-      for (int i = 0; i < attributeColumns.size(); i++) {
-        String value = cell(cells, attributeColumns.get(i));
-        missing[i] = isMissing(value);
-        attributes[i] = missing[i] ? Double.NaN : Double.parseDouble(value);
+      String[] header = split(headerLine);
+      int objectId = requiredColumn(header, "objectId");
+      int instanceId = optionalColumn(header, "instanceId");
+      int queryId = requiredColumn(header, "queryId");
+      int eventTime = requiredColumn(header, "eventTime");
+      int opType = optionalColumn(header, "opType");
+      int probability = optionalColumn(header, "probability");
+      int serverId = optionalColumn(header, "serverId");
+      List<Integer> attributeColumns = attributeColumns(header);
+      List<Integer> queryAttributeColumns = queryAttributeColumns(header, attributeColumns.size());
+      List<Integer> mbrMinColumns = coordinateColumns(header, "mbrMin", attributeColumns.size());
+      List<Integer> mbrMaxColumns = coordinateColumns(header, "mbrMax", attributeColumns.size());
+      if (mbrMinColumns.isEmpty() != mbrMaxColumns.isEmpty()) {
+        throw new IllegalArgumentException("csv dataset must provide both mbrMin and mbrMax columns");
       }
+      if (attributeColumns.isEmpty()) {
+        throw new IllegalArgumentException(
+            "csv dataset must contain attribute columns after opType or named a0,a1,...");
+      }
+      dimensions = attributeColumns.size();
 
-      String qid = cell(cells, queryId);
-      double[] mbrMin = coordinates(cells, mbrMinColumns);
-      double[] mbrMax = coordinates(cells, mbrMaxColumns);
-      events.add(new RawEvent(
-          cell(cells, objectId),
-          instanceId < 0 ? cell(cells, objectId) + "#raw" : cell(cells, instanceId),
-          qid,
-          Long.parseLong(cell(cells, eventTime)),
-          probability < 0 ? 1.0 : Double.parseDouble(cell(cells, probability)),
-          serverId < 0 ? -1 : Integer.parseInt(cell(cells, serverId)),
-          attributes,
-          missing,
-          mbrMin,
-          mbrMax,
-          parseOpType(opType < 0 ? "" : cell(cells, opType))));
-      queryPoints.computeIfAbsent(qid, id -> queryPoint(
-          id, cells, queryAttributeColumns, attributeColumns.size()));
+      String rawLine;
+      while ((rawLine = reader.readLine()) != null) {
+        String line = rawLine.trim();
+        if (line.isEmpty() || line.startsWith("#")) {
+          continue;
+        }
+        String[] cells = split(line);
+        double[] attributes = new double[dimensions];
+        boolean[] missing = new boolean[dimensions];
+        for (int i = 0; i < dimensions; i++) {
+          String value = cell(cells, attributeColumns.get(i));
+          missing[i] = isMissing(value);
+          attributes[i] = missing[i] ? Double.NaN : Double.parseDouble(value);
+        }
+
+        String qid = cell(cells, queryId);
+        double[] mbrMin = coordinates(cells, mbrMinColumns);
+        double[] mbrMax = coordinates(cells, mbrMaxColumns);
+        events.add(new RawEvent(
+            cell(cells, objectId),
+            instanceId < 0 ? cell(cells, objectId) + "#raw" : cell(cells, instanceId),
+            qid,
+            Long.parseLong(cell(cells, eventTime)),
+            probability < 0 ? 1.0 : Double.parseDouble(cell(cells, probability)),
+            serverId < 0 ? -1 : Integer.parseInt(cell(cells, serverId)),
+            attributes,
+            missing,
+            mbrMin,
+            mbrMax,
+            parseOpType(opType < 0 ? "" : cell(cells, opType))));
+        queryPoints.computeIfAbsent(qid, id -> queryPoint(
+            id, cells, queryAttributeColumns, dimensions));
+      }
     }
 
-    int dimensions = attributeColumns.size();
     Map<String, QueryPoint> points = queryPoints.isEmpty()
         ? DatasetDefaults.queryPoints(config.queries(), dimensions)
         : queryPoints;

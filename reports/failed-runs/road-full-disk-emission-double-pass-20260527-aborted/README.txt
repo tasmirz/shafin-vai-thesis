@@ -1,0 +1,1 @@
+Stopped after stable memory behavior demonstrated that the disk-backed partial stage was being executed twice: once for emittedRecords count and again for exact contribution traversal. Follow-up combines both outputs in one reducer aggregation.

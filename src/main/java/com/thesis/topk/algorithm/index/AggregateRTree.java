@@ -10,6 +10,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -58,15 +61,14 @@ public final class AggregateRTree implements Serializable {
     }
     List<ObjectEntry> objects = byObject.entrySet().stream()
         .map(entry -> ObjectEntry.from(entry.getKey(), entry.getValue()))
-        .sorted(Comparator.comparingDouble(object -> center(object.minimum(), object.maximum(), 0)))
         .toList();
     Map<String, Double> objectMasses = objects.stream()
         .collect(Collectors.toMap(ObjectEntry::objectId, ObjectEntry::probabilityMass));
     Map<String, Node> nodeMap = new HashMap<>();
     List<Node> level = new ArrayList<>();
     int serial = 0;
-    for (int start = 0; start < objects.size(); start += fanout) {
-      List<ObjectEntry> members = objects.subList(start, Math.min(start + fanout, objects.size()));
+    for (List<ObjectEntry> members : strGroups(
+        objects, fanout, ObjectEntry::minimum, ObjectEntry::maximum)) {
       Node leaf = Node.leaf(nodeId(partitionId, 0, serial++), partitionId, members);
       level.add(leaf);
       nodeMap.put(leaf.id(), leaf);
@@ -74,14 +76,9 @@ public final class AggregateRTree implements Serializable {
     int height = 0;
     while (level.size() > 1) {
       height++;
-      int dimension = height % objects.get(0).minimum().length;
-      level = level.stream()
-          .sorted(Comparator.comparingDouble(node -> center(node.minimum(), node.maximum(), dimension)))
-          .toList();
       List<Node> parents = new ArrayList<>();
       serial = 0;
-      for (int start = 0; start < level.size(); start += fanout) {
-        List<Node> children = level.subList(start, Math.min(start + fanout, level.size()));
+      for (List<Node> children : strGroups(level, fanout, Node::minimum, Node::maximum)) {
         Node parent = Node.branch(nodeId(partitionId, height, serial++), partitionId, height, children);
         parents.add(parent);
         nodeMap.put(parent.id(), parent);
@@ -109,6 +106,22 @@ public final class AggregateRTree implements Serializable {
   }
 
   /**
+   * Returns an index-distribution view carrying only aggregate MBR nodes and masses.
+   *
+   * <p>Remote filtering mappers do not need instance payloads or leaf object identifiers.
+   * Full leaf state remains at the keyed reducer partition for partial-MBR traversal.</p>
+   */
+  public AggregateRTree summaryOnly() {
+    if (root == null) {
+      return this;
+    }
+    Map<String, Node> summarizedNodes = new HashMap<>();
+    Node summarizedRoot = Node.summary(root, summarizedNodes);
+    return new AggregateRTree(
+        partitionId, fanout, summarizedRoot, summarizedNodes, new HashMap<>());
+  }
+
+  /**
    * Selects an exported summary level using the paper's communication-cost trade-off.
    *
    * <p>A finer level costs more index entries to distribute, but usually emits fewer partially
@@ -119,7 +132,7 @@ public final class AggregateRTree implements Serializable {
   public LevelSelection selectExportLevel(
       List<ProbabilisticInstance> probes, QueryPoint queryPoint) {
     if (root == null) {
-      return new LevelSelection(partitionId, 0, 0, 0L, 0L);
+      return new LevelSelection(partitionId, 0, 0, 0L, 0L, 0L);
     }
     LevelSelection selected = null;
     List<ProbabilisticInstance> sampledProbes = calibrationSample(probes);
@@ -179,7 +192,11 @@ public final class AggregateRTree implements Serializable {
       InspectionAccumulator result) {
     if (DominanceScorer.dynamicallyDominatesMbrFully(
         candidate, node.minimum(), node.maximum(), queryPoint)) {
-      result.fullyDominatedMass += node.probabilityMass();
+      double mass = node.probabilityMass();
+      if (node.objectIds().contains(candidate.objectId())) {
+        mass -= objectMassById.getOrDefault(candidate.objectId(), 0.0);
+      }
+      result.fullyDominatedMass += mass;
       return;
     }
     if (!DominanceScorer.dynamicallyDominatesMbrPossibly(
@@ -217,6 +234,99 @@ public final class AggregateRTree implements Serializable {
   /** Traverses the local index root without counting the candidate's own uncertain object. */
   public double exactDominatedMass(ProbabilisticInstance candidate, QueryPoint queryPoint) {
     return root == null ? 0.0 : exactDominatedMass(candidate, root, queryPoint);
+  }
+
+  /**
+   * Visits local objects in descending conservative upper-bound order.
+   *
+   * <p>The filtering mapper can stop evaluating leaf objects once its current k-th lower-bound
+   * threshold exceeds the upper bound inherited from the next heap entry. This mirrors the
+   * heap-ordered local traversal of Rai and Lian Algorithm 2.</p>
+   */
+  public List<ObjectCandidate> bestFirstObjectCandidates(
+      Map<Integer, AggregateRTree> indexes, QueryPoint queryPoint) {
+    List<ObjectCandidate> candidates = new ArrayList<>(objectCount());
+    visitBestFirstObjectCandidates(indexes, queryPoint, candidate -> {
+      candidates.add(candidate);
+      return true;
+    });
+    return candidates;
+  }
+
+  /**
+   * Visits local objects in heap order, stopping before expanding the remaining frontier when
+   * the visitor rejects a candidate. Returned identifiers are objects excluded by that stop.
+   */
+  public List<String> visitBestFirstObjectCandidates(
+      Map<Integer, AggregateRTree> indexes,
+      QueryPoint queryPoint,
+      Predicate<ObjectCandidate> visitor) {
+    if (root == null) {
+      return List.of();
+    }
+    PriorityQueue<NodeBound> heap = new PriorityQueue<>(
+        Comparator.comparingDouble(NodeBound::upperBound).reversed());
+    heap.add(new NodeBound(root, scoreUpperBound(root, indexes, queryPoint)));
+    while (!heap.isEmpty()) {
+      NodeBound current = heap.remove();
+      Node node = current.node();
+      if (node.leaf()) {
+        for (int index = 0; index < node.objects().size(); index++) {
+          ObjectEntry object = node.objects().get(index);
+          if (!visitor.test(new ObjectCandidate(
+              object.objectId(), object.instances(), current.upperBound()))) {
+            List<String> skipped = new ArrayList<>();
+            for (int remaining = index; remaining < node.objects().size(); remaining++) {
+              skipped.add(node.objects().get(remaining).objectId());
+            }
+            for (NodeBound pending : heap) {
+              skipped.addAll(pending.node().objectIds());
+            }
+            return skipped;
+          }
+        }
+      } else {
+        for (Node child : node.children()) {
+          heap.add(new NodeBound(child, scoreUpperBound(child, indexes, queryPoint)));
+        }
+      }
+    }
+    return List.of();
+  }
+
+  private static double scoreUpperBound(
+      Node candidateNode,
+      Map<Integer, AggregateRTree> indexes,
+      QueryPoint queryPoint) {
+    return indexes.values().stream()
+        .mapToDouble(index -> index.possiblyDominatedLeafMass(
+            candidateNode.minimum(), candidateNode.maximum(), queryPoint))
+        .sum();
+  }
+
+  private double possiblyDominatedLeafMass(
+      double[] candidateMinimum, double[] candidateMaximum, QueryPoint queryPoint) {
+    return root == null
+        ? 0.0
+        : possiblyDominatedLeafMass(candidateMinimum, candidateMaximum, root, queryPoint);
+  }
+
+  private double possiblyDominatedLeafMass(
+      double[] candidateMinimum,
+      double[] candidateMaximum,
+      Node node,
+      QueryPoint queryPoint) {
+    if (!DominanceScorer.mbrCouldDynamicallyDominateMbr(
+        candidateMinimum, candidateMaximum, node.minimum(), node.maximum(), queryPoint)) {
+      return 0.0;
+    }
+    if (node.leaf()) {
+      return node.probabilityMass();
+    }
+    return node.children().stream()
+        .mapToDouble(child -> possiblyDominatedLeafMass(
+            candidateMinimum, candidateMaximum, child, queryPoint))
+        .sum();
   }
 
   private double exactDominatedMass(
@@ -288,6 +398,40 @@ public final class AggregateRTree implements Serializable {
     return (minimum[dimension] + maximum[dimension]) / 2.0;
   }
 
+  /**
+   * Packs 2D MBRs using Sort-Tile-Recursive grouping to avoid stripe-shaped parent rectangles.
+   * Higher-dimensional inputs still use their first two spatial dimensions for index packing.
+   */
+  private static <T> List<List<T>> strGroups(
+      List<T> entries,
+      int capacity,
+      Function<T, double[]> minimumAccessor,
+      Function<T, double[]> maximumAccessor) {
+    if (entries.isEmpty()) {
+      return List.of();
+    }
+    int dimensions = minimumAccessor.apply(entries.get(0)).length;
+    int yDimension = dimensions > 1 ? 1 : 0;
+    int groupCount = (entries.size() + capacity - 1) / capacity;
+    int slices = Math.max(1, (int) Math.ceil(Math.sqrt(groupCount)));
+    int sliceCapacity = (entries.size() + slices - 1) / slices;
+    List<T> ordered = new ArrayList<>(entries);
+    ordered.sort(Comparator.comparingDouble(
+        entry -> center(minimumAccessor.apply(entry), maximumAccessor.apply(entry), 0)));
+    List<List<T>> groups = new ArrayList<>(groupCount);
+    for (int sliceStart = 0; sliceStart < ordered.size(); sliceStart += sliceCapacity) {
+      List<T> slice = new ArrayList<>(
+          ordered.subList(sliceStart, Math.min(sliceStart + sliceCapacity, ordered.size())));
+      slice.sort(Comparator.comparingDouble(
+          entry -> center(minimumAccessor.apply(entry), maximumAccessor.apply(entry), yDimension)));
+      for (int start = 0; start < slice.size(); start += capacity) {
+        groups.add(new ArrayList<>(
+            slice.subList(start, Math.min(start + capacity, slice.size()))));
+      }
+    }
+    return groups;
+  }
+
   private static double[] minimum(List<double[]> values) {
     double[] minimum = values.get(0).clone();
     for (double[] value : values) {
@@ -313,6 +457,7 @@ public final class AggregateRTree implements Serializable {
     private final int level;
     private final int exportedNodes;
     private final long estimatedPartialReferences;
+    private final long estimatedTraversalObjects;
     private final long estimatedCommunicationCost;
 
     LevelSelection(
@@ -374,6 +519,28 @@ public final class AggregateRTree implements Serializable {
           .mapToDouble(NodeReference::probabilityMass)
           .sum();
     }
+  }
+
+  public static final class ObjectCandidate implements Serializable {
+    private final String objectId;
+    private final List<ProbabilisticInstance> instances;
+    private final double traversalUpperBound;
+
+    ObjectCandidate(
+        String objectId,
+        List<ProbabilisticInstance> instances,
+        double traversalUpperBound) {
+      this.objectId = objectId;
+      this.instances = new ArrayList<>(instances);
+      this.traversalUpperBound = traversalUpperBound;
+    }
+
+    public String objectId() { return objectId; }
+    public List<ProbabilisticInstance> instances() { return instances; }
+    public double traversalUpperBound() { return traversalUpperBound; }
+  }
+
+  private record NodeBound(Node node, double upperBound) implements Serializable {
   }
 
   private static final class ObjectEntry implements Serializable {
@@ -499,6 +666,25 @@ public final class AggregateRTree implements Serializable {
           AggregateRTree.maximum(children.stream().map(Node::maximum).toList()),
           children.stream().mapToDouble(Node::probabilityMass).sum(),
           children.stream().mapToInt(Node::objectCount).sum());
+    }
+
+    private static Node summary(Node source, Map<String, Node> nodesById) {
+      List<Node> children = source.children().stream()
+          .map(child -> summary(child, nodesById))
+          .toList();
+      Node summary = new Node(
+          source.id,
+          source.partitionId,
+          source.level,
+          new ArrayList<>(children),
+          new ArrayList<>(),
+          new ArrayList<>(),
+          source.minimum.clone(),
+          source.maximum.clone(),
+          source.probabilityMass,
+          source.objectCount);
+      nodesById.put(summary.id(), summary);
+      return summary;
     }
 
     private boolean leaf() {

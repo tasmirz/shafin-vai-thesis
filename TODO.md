@@ -89,6 +89,8 @@
 - [x] Curate Bangladesh OSM line segments into projected MBRs with 5-11 normalized instances and a partition-index manifest.
 - [x] Add paper-shaped smartphone uncertain-instance/probability data and Spark provider for curated uncertain-object rows.
 - [x] Evaluate dynamic load balancing and worker-utilization/skew metrics inspired by `papers/3700838.3700859.pdf` using partition manifests and observed Spark straggler ratios.
+- [x] Persist bounded per-object DDR/MBR decision and AES emission trace samples for each saved Spark run.
+- [x] Generate paper-style observed-treatment figures while separating published Hadoop reference values.
 
 ## 12. Full Baseline Reproduction Boundary
 
@@ -96,5 +98,14 @@
 - [x] Separate exact-validation fixtures from paper-sized performance executions so oracle cost is not presented as algorithm cost.
 - [x] Implement Rai-Lian distributed aggregate R-tree level selection/cost model and reducer-side partial-MBR refinement for curated MBR inputs.
 - [x] Add Rai-Lian paper-shaped synthetic uncertain-region datasets for uniform, Gaussian and Zipf (skew 0.8) centers with configurable `lmax`.
-- [ ] Add offline persisted historical/uniform query-log calibration and heap-ordered local aR-tree candidate traversal if a byte-faithful Rai-Lian Algorithms 2-3 baseline is required.
-- [ ] Execute the 98,451-object road and full smartphone controlled suites after the indexed distributed implementation is available.
+- [x] Add isolated Docker Compose HDFS/YARN MapReduce infrastructure and a non-PTD smoke validation command for future same-machine comparison.
+- [x] Execute the full curated smartphone Spark treatment suite with 20 saved query results and trace artifacts.
+- [x] Add heap-ordered local aR-tree candidate traversal for Rai-Lian mapper-side score-bound filtering.
+- [ ] Add offline persisted historical/uniform query-log calibration if a byte-faithful Rai-Lian exported-level selection baseline is required.
+- [ ] Implement the Rai-Lian/ICCIT algorithm as genuine Hadoop MapReduce jobs before labeling any Hadoop-vs-Spark timing as an engine comparison.
+- [x] Complete the 98,451-object Bangladesh road Spark treatment suite using heap-ordered local
+  aR-tree traversal, STR spatial packing and lazy reducer partial scoring. The completed
+  four-treatment suite is archived under `iccit-road-full-str-20260527T073041Z-*`; the
+  replacement smartphone suite is archived under `iccit-smartphone-str-20260527T073310Z-*`.
+  The aborted pre-fix run is retained only as diagnostic history at
+  `reports/failed-runs/iccit-road-full-traversalcost-20260527T040250Z-aborted/spark.log`.

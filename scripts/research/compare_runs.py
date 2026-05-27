@@ -56,7 +56,7 @@ def main():
     spark = metrics["spark"]
     validation = metrics["validation"]
     prune = spark["avgPruneRatio"]
-    prune_text = "n/a" if spark.get("algorithm") in ("baseline", "aes-only") else f"{prune:.4f}"
+    prune_text = "n/a" if prune is None else f"{prune:.4f}"
     exact = validation["exactTopKAgreement"]
     exact_text = "not run" if exact is None else str(exact)
     print(

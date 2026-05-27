@@ -9,6 +9,8 @@ K="${K:-10}"
 PARTITIONS="${PARTITIONS:-8}"
 VALIDATE_EXACT="${VALIDATE_EXACT:-false}"
 SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-2g}"
+SPARK_MASTER="${SPARK_MASTER:-local[4]}"
+TRACE_LIMIT="${TRACE_LIMIT:-25}"
 
 case "$PROFILE" in
   smartphone)
@@ -51,6 +53,8 @@ test -f "$DATASET_MANIFEST"
 echo "Running same-machine ICCIT treatment comparison."
 echo "profile=$PROFILE k=$K partitions=$PARTITIONS validateExact=$VALIDATE_EXACT"
 echo "sparkDriverMemory=$SPARK_DRIVER_MEMORY"
+echo "sparkMaster=$SPARK_MASTER"
+echo "traceLimit=$TRACE_LIMIT"
 echo "The ICCIT paper does not publish k, partition count or query seeds; these are declared protocol assumptions."
 
 SUITE_ID="$SUITE_ID" CSV_PATH="$CSV_PATH" DATASET_MANIFEST="$DATASET_MANIFEST" \
@@ -58,17 +62,19 @@ SUITE_ID="$SUITE_ID" CSV_PATH="$CSV_PATH" DATASET_MANIFEST="$DATASET_MANIFEST" \
   REQUIRE_EXACT="$VALIDATE_EXACT" REQUIRE_PRUNING=false \
   REUSE_EXISTING_RUNS="${REUSE_EXISTING_RUNS:-false}" BUILD_IMAGE="$BUILD_IMAGE" \
   SPARK_DRIVER_MEMORY="$SPARK_DRIVER_MEMORY" \
+  SPARK_MASTER="$SPARK_MASTER" \
+  TRACE_LIMIT="$TRACE_LIMIT" \
   scripts/research/run_ablation_suite.sh
 
 OUTPUT="$ROOT_DIR/reports/validation/${SUITE_ID}.md"
-python3 - "$SUITE_ID" "$PROFILE" "$K" "$PARTITIONS" "$VALIDATE_EXACT" "$SPARK_DRIVER_MEMORY" \
+python3 - "$SUITE_ID" "$PROFILE" "$K" "$PARTITIONS" "$VALIDATE_EXACT" "$SPARK_DRIVER_MEMORY" "$SPARK_MASTER" \
   "$PAPER_BASELINE_MS" "$PAPER_PROPOSED_MS" "$PAPER_REDUCTION" "$OUTPUT" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-suite, profile, k, partitions, validated, driver_memory, paper_base, paper_full, paper_reduction, output = sys.argv[1:]
+suite, profile, k, partitions, validated, driver_memory, spark_master, paper_base, paper_full, paper_reduction, output = sys.argv[1:]
 root = Path("reports/runs")
 variants = ("baseline", "aes-only", "dscp-only", "aes-dscp")
 metrics = {
@@ -84,7 +90,7 @@ rows = []
 for variant in variants:
   spark = metrics[variant]["spark"]
   exact = metrics[variant]["validation"]["exactTopKAgreement"]
-  prune = "n/a" if variant in ("baseline", "aes-only") else f"{spark['avgPruneRatio'] * 100:.2f}%"
+  prune = f"{spark['avgPruneRatio'] * 100:.2f}%"
   rows.append(
       f"| {variant} | {spark['algorithmElapsedMs']:,} | {reduction(spark['algorithmElapsedMs']):.2f}% | "
       f"{prune} | {spark['totalEmittedRecords']:,} | {spark['totalShuffleBytes']:,} | "
@@ -108,6 +114,7 @@ partition count or query seeds; this execution records assumed values explicitly
 | partitions (declared assumption) | `{partitions}` |
 | Exact oracle during performance run | `{validated}` |
 | Spark driver memory | `{driver_memory}` |
+| Spark master | `{spark_master}` |
 | Bound mode | `{metrics['aes-dscp']['spark'].get('boundMode')}` |
 
 ## Published ICCIT Reference Only
@@ -118,17 +125,21 @@ partition count or query seeds; this execution records assumed values explicitly
 
 ## Observed Spark Same-Machine Treatments
 
-| Treatment | Algorithm ms | Reduction vs Spark baseline | Pruned | Emitted records | Shuffle bytes | Partial MBR refs | Exact agreement |
+| Treatment | Algorithm ms | Reduction vs Spark baseline | Candidate filtered | Emitted records | Shuffle bytes | Partial MBR refs | Exact agreement |
 |---|---:|---:|---:|---:|---:|---:|---|
 {chr(10).join(rows)}
 
 For paper-sized performance runs with exact validation disabled, exactness evidence must be
 paired with the validated deterministic MBR suite and road smoke suite before results are used in
-a manuscript. This runtime implements a packed aggregate R-tree per partition, selected exported
+a manuscript. `Candidate filtered` includes the Rai-Lian indexed baseline's bound filtering;
+the DSCP contribution is the additional filtering and runtime difference relative to that indexed
+baseline, not the full value in that column. This runtime implements an STR-packed aggregate
+R-tree per partition, selected exported
 index levels and reducer-stage traversal of partial MBR references. The selected-level estimate
-uses a deterministic representative candidate-instance probe sample as a stand-in for the
-historical/uniform query calibration described in the target paper; this is a declared Spark
-adaptation of Rai and Lian's index distribution policy.
+uses a deterministic representative candidate-instance probe sample and estimated reducer
+subtree traversal work as a stand-in for the historical/uniform query calibration described in
+the target paper; this is a declared Spark adaptation of Rai and Lian's index distribution
+policy.
 """
 Path(output).write_text(content)
 print(f"comparisonReport={output}")

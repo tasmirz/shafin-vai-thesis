@@ -1,0 +1,1 @@
+Stopped after memory rose above 7 GiB during partial-emission materialization; filtering-envelope retention had been removed. Follow-up change releases filtering RDDs before emission and persists partial records disk-only.

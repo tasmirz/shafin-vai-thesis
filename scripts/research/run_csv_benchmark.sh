@@ -14,6 +14,8 @@ BUILD_IMAGE="${BUILD_IMAGE:-1}"
 VALIDATE_EXACT="${VALIDATE_EXACT:-true}"
 RUN_LOCAL_ORACLE="${RUN_LOCAL_ORACLE:-$VALIDATE_EXACT}"
 SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-2g}"
+SPARK_MASTER="${SPARK_MASTER:-local[4]}"
+TRACE_LIMIT="${TRACE_LIMIT:-25}"
 cleanup() {
   status=$?
   if ((status == 0)); then
@@ -43,14 +45,15 @@ docker run --rm \
   -v "$CSV_PATH:/opt/spark/input/events.csv:ro,Z" \
   thesis-topk-spark:local \
   /opt/spark/bin/spark-submit \
-  --master "local[2]" \
+  --master "$SPARK_MASTER" \
   --driver-memory "$SPARK_DRIVER_MEMORY" \
   --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
   /opt/spark/app/topk-spark.jar \
   --source=simulator --dataset=csv --datasetPath=/opt/spark/input/events.csv \
   --k="$K" --partitions="$PARTITIONS" --seed="$SEED" --synopsisBins="$SYNOPSIS_BINS" \
   --algorithm="$ALGORITHM" \
-  --validateExact="$VALIDATE_EXACT" --sparkMaster="local[2]" >"$RUN_TMP/spark.log" 2>&1
+  --traceLimit="$TRACE_LIMIT" \
+  --validateExact="$VALIDATE_EXACT" --sparkMaster="$SPARK_MASTER" >"$RUN_TMP/spark.log" 2>&1
 if [[ "$RUN_LOCAL_ORACLE" == "1" || "$RUN_LOCAL_ORACLE" == "true" ]]; then
   mvn -q -DskipTests compile exec:java \
     -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
@@ -88,6 +91,8 @@ archive_args=(
   --parameter "synopsisBins=$SYNOPSIS_BINS"
   --parameter "validateExact=$VALIDATE_EXACT"
   --parameter "sparkDriverMemory=$SPARK_DRIVER_MEMORY"
+  --parameter "sparkMaster=$SPARK_MASTER"
+  --parameter "traceLimit=$TRACE_LIMIT"
 )
 if [[ -f "$RUN_TMP/algorithm.log" ]]; then
   archive_args+=(--algorithm-log "$RUN_TMP/algorithm.log")

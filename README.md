@@ -18,7 +18,7 @@ Raw uncertain events
 
 Curated uncertain-object records carrying MBR coordinates build one packed aggregate R-tree per
 server partition. The engine selects an exported index level using a deterministic representative
-probe sample to estimate exported-node plus partial-reference communication cost, uses fully
+probe sample to estimate exported-node, partial-reference and reducer-traversal work cost, uses fully
 dominated node aggregates in bounds, and
 traverses partial MBR references in the reducer-shaped Spark stage. Inputs without MBR metadata,
 including generated raw stream events, use an index-free conservative remote-partition upper
@@ -208,7 +208,10 @@ Missing values can be blank, `null`, `NaN`, or `?`. `opType` may be blank and de
 Paper-curated CSVs additionally supply `instanceId`, `probability`, `serverId`,
 `queryA0...queryAn`, and MBR bounds.
 
-For Docker/Kubernetes runs, `DATASET_PATH` must be visible inside the container. The Spark image looks under `/opt/spark/datasets-raw` for baked-in raw datasets.
+For Docker/Kubernetes runs, `DATASET_PATH` must be visible inside the container. The Spark
+runtime image is intentionally lean; local commands mount `datasets-raw/` at
+`/opt/spark/datasets-raw` only for raw-provider runs rather than embedding large source
+archives into each benchmark image.
 
 ## Research Test Profiles And Saved Runs
 
@@ -253,6 +256,16 @@ Run the actual stream route with a finite reproducible workload:
 ```bash
 RUN_ID=stream-baseline OBJECTS=12 QUERIES=2 DIMENSIONS=2 K=2 just stream-test
 ```
+
+Validate the separate Hadoop/HDFS/YARN MapReduce execution surface:
+
+```bash
+just hadoop-smoke
+```
+
+This validates Hadoop infrastructure with an official MapReduce examples job only. It is not a
+Hadoop PTD baseline and is intentionally excluded from Spark performance comparisons until
+Rai-Lian/ICCIT Mapper/Reducer jobs are implemented over the same curated inputs.
 
 To keep a command-line validation run from updating the latest shared E2E
 snapshot files, direct its transient logs to another directory:
@@ -378,4 +391,12 @@ Paper alignment report:
 
 ```text
 reports/validation/paper-alignment.md
+```
+Each new finite benchmark archives a bounded `object-traces.csv` sample containing per-object
+LB/UB/tau decisions, partial MBR references and AES versus expanded emission counts. Once a
+smartphone and road suite complete, render paper-shaped SVG evidence without mixing runtimes
+from unlike machines:
+
+```bash
+just paper-figures <smartphone-suite-id> <road-suite-id>
 ```

@@ -1,4 +1,4 @@
-const state = { dashboard: null, runs: [], csv: null, jobs: [], paperDatasets: [], osm: null, matrix: null };
+const state = { dashboard: null, runs: [], csv: null, jobs: [], paperDatasets: [], osm: null, matrix: null, figures: [] };
 
 const titles = {
   dashboard: "Research Dashboard",
@@ -15,9 +15,9 @@ const titles = {
 const algorithms = [
   { name: "Spark PTD variant engine", status: "Implemented", className: "teal", detail: "Treatment registry, executed emission stages and exact refinement validated against the oracle.", runtime: "Apache Spark / exact validation" },
   { name: "Brute-force exact oracle", status: "Implemented", className: "teal", detail: "Correctness reference executed for finite CSV and streaming profiles.", runtime: "Local Java benchmark oracle" },
-  { name: "Baseline distributed PTD", status: "Implemented", className: "teal", detail: "Explicit no-AES/no-DSCP treatment and expanded instance-competitor emission stage.", runtime: "--algorithm=baseline" },
+  { name: "Baseline distributed PTD", status: "Implemented", className: "teal", detail: "Rai-Lian aggregate-R-tree score-bound treatment without AES/DSCP extensions; emits expanded instance-competitor records.", runtime: "--algorithm=baseline" },
   { name: "DSCP-only", status: "Implemented", className: "teal", detail: "Threshold pruning with expanded emissions and recorded false-prune evidence.", runtime: "--algorithm=dscp-only" },
-  { name: "AES-only", status: "Implemented", className: "teal", detail: "Aggregated emission stage without DSCP filtering.", runtime: "--algorithm=aes-only" },
+  { name: "AES-only", status: "Implemented", className: "teal", detail: "Rai-Lian indexed candidate filtering with aggregated emissions, without the DSCP extension.", runtime: "--algorithm=aes-only" },
   { name: "AES + DSCP", status: "Implemented", className: "teal", detail: "Full named method with pruning and aggregated emissions.", runtime: "--algorithm=aes-dscp" }
 ];
 
@@ -25,9 +25,9 @@ const stages = [
   { name: "Input data", label: "CSV or MQTT", detail: "A run consumes either normalized CSV records or simulator events published through MQTT and bridged into Kafka.", metrics: [["CSV rows", "Dataset inspector"], ["MQTT events", "E2E summary"], ["Data checksum", "Run manifest"]] },
   { name: "Kafka ingestion", label: "Structured Streaming", detail: "Finite stream runs use Spark Structured Streaming with an AvailableNow trigger so every saved benchmark ranks a fixed snapshot.", metrics: [["Reader", "AvailableNow"], ["Evidence", "structuredStreamingKafka"], ["Source", "Kafka"]] },
   { name: "Imputation", label: "Probabilistic instances", detail: "Incomplete values are repaired, while curated paper instances retain supplied normalized appearance probability.", metrics: [["Raw events", "Recorded"], ["Probabilistic instances", "Recorded"], ["Probability normalization", "Audited"]] },
-  { name: "Candidate filtering", label: "Optional DSCP", detail: "The registry enables DSCP only in its named treatments and records pruning ratio, tau and zero-false-prune validation per query.", metrics: [["Pruned objects", "Recorded"], ["Threshold tau", "Recorded"], ["False prunes", "Validated"]] },
+  { name: "Candidate filtering", label: "aR-tree + optional DSCP", detail: "Indexed variants use heap-ordered Rai-Lian score-bound traversal; named DSCP treatments apply the additional threshold filter. Exact runs audit all excluded objects.", metrics: [["Pruned objects", "Recorded"], ["Threshold tau", "DSCP"], ["False prunes", "Validated"]] },
   { name: "Emission / shuffle", label: "Optional AES", detail: "Spark materializes expanded or aggregated records and records task-level shuffle bytes and records.", metrics: [["Emitted records", "Executed"], ["AER", "Recorded"], ["Shuffle bytes", "Observed"]] },
-  { name: "Refinement", label: "Exact top-k", detail: "Surviving candidate objects are exactly scored, then compared with the brute-force oracle when validation is enabled.", metrics: [["Algorithm elapsed", "Recorded"], ["Exact agreement", "Required"], ["Validation elapsed", "Excluded from algorithm time"]] },
+  { name: "Refinement", label: "Exact top-k", detail: "Surviving candidate objects are exactly scored, then compared with the brute-force oracle when validation is enabled. Query phase time excludes setup and validation.", metrics: [["Algorithm elapsed", "Filter + emit + refine"], ["Exact agreement", "Required"], ["Setup/validation", "Separate"]] },
   { name: "Artifact store", label: "Immutable evidence", detail: "Completed runs store parameters, Git identity, dataset checksum, metrics and logs. Comparison checks fairness-critical parameters.", metrics: [["Manifest", "Recorded"], ["Metrics CSV/JSON", "Recorded"], ["Bundle export", "Available"]] }
 ];
 
@@ -50,7 +50,7 @@ function hasDscp(algorithm) {
 }
 
 function pruningDisplay(algorithm, value) {
-  return hasDscp(algorithm) ? percent(value) : "n/a";
+  return percent(value);
 }
 
 function validationDisplay(value) {
@@ -84,9 +84,10 @@ function openView(name) {
 
 async function refreshAll() {
   try {
-    const [dashboard, runDocument, csv, jobs, datasets, osm, matrix] = await Promise.all([
+    const [dashboard, runDocument, csv, jobs, datasets, osm, matrix, figures] = await Promise.all([
       api("/api/dashboard"), api("/api/runs"), api("/api/datasets/csv"), api("/api/jobs"),
-      api("/api/datasets/paper"), api("/api/datasets/osm-readiness"), api("/api/experiment-matrix")
+      api("/api/datasets/paper"), api("/api/datasets/osm-readiness"), api("/api/experiment-matrix"),
+      api("/api/reports/figures")
     ]);
     state.dashboard = dashboard;
     state.runs = runDocument.runs;
@@ -95,6 +96,7 @@ async function refreshAll() {
     state.paperDatasets = datasets.datasets;
     state.osm = osm;
     state.matrix = matrix;
+    state.figures = figures.figures;
     renderDashboard();
     renderRunArchive();
     renderResults();
@@ -104,6 +106,7 @@ async function refreshAll() {
     renderPaperDatasets();
     renderTelemetry();
     renderMatrix();
+    renderPaperFigures();
     renderJobs();
   } catch (error) {
     toast(error.message, true);
@@ -114,7 +117,7 @@ function runTable(runs, selection = false) {
   if (!runs.length) return '<div class="empty-state">No saved run artifacts have been generated yet.</div>';
   return `<div class="scroll-table"><table class="table"><thead><tr>
     ${selection ? "<th>Select</th>" : ""}
-    <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Pruned</th><th>Validation</th>
+    <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Filtered</th><th>Validation</th>
   </tr></thead><tbody>${runs.map(run => {
     const validation = validationDisplay(run.summary.exactAgreement);
     return `<tr>
@@ -265,6 +268,14 @@ function renderMatrix() {
     ${matrix.warning ? `<p class="callout warning">${escapeHtml(matrix.warning)}</p>` : ""}`;
 }
 
+function renderPaperFigures() {
+  const element = document.getElementById("paper-figures");
+  element.innerHTML = state.figures.length ? state.figures.map(figure => `<figure class="paper-figure">
+    <img src="${escapeHtml(figure.url)}" alt="${escapeHtml(figure.name)}">
+    <figcaption>${escapeHtml(figure.name)}</figcaption>
+  </figure>`).join("") : '<div class="empty-state">Render completed treatment suites to produce paper-style SVG figures.</div>';
+}
+
 function renderAlgorithms() {
   document.getElementById("algorithm-grid").innerHTML = algorithms.map(item => `<article class="algorithm">
     <span class="badge ${item.className || ""}">${escapeHtml(item.status)}</span>
@@ -321,22 +332,23 @@ async function showRun(runId) {
     document.getElementById("drawer-title").textContent = run.id;
     document.getElementById("drawer-content").innerHTML = `<div class="detail-stats">
       <div><label>Algorithm elapsed</label><strong>${formatMs(spark.algorithmElapsedMs)}</strong></div>
+      <div><label>Setup elapsed</label><strong>${formatMs(spark.setupMs)}</strong></div>
       <div><label>Variant</label><strong>${escapeHtml(spark.algorithm || "legacy")}</strong></div>
       <div><label>Validation elapsed</label><strong>${formatMs(spark.validationMs)}</strong></div>
       <div><label>Raw events</label><strong>${spark.rawEvents ?? "n/a"}</strong></div>
-      <div><label>Avg pruning</label><strong>${pruningDisplay(spark.algorithm, spark.avgPruneRatio)}</strong></div>
+      <div><label>Avg candidate filtered</label><strong>${pruningDisplay(spark.algorithm, spark.avgPruneRatio)}</strong></div>
       <div><label>Avg AER</label><strong>${percent(spark.avgAER)}</strong></div>
     </div>
     <div class="detail-section"><h4>Recorded configuration</h4>
       ${Object.entries(run.manifest.parameters).map(([name, value]) => `<div class="metric-row"><span>${escapeHtml(name)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
       <div class="metric-row"><span>Bound mode</span><strong>${escapeHtml(spark.boundMode || "not recorded")}</strong></div>
       <p class="callout info">${hasDscp(spark.algorithm)
-        ? (spark.avgPruneRatio === 0 ? "No candidate satisfied UB < tau under the recorded bounds." : "Pruning is certified by UB < tau and checked against the exact oracle.")
-        : "This variant does not execute DSCP; pruning is not applicable."}</p>
+        ? (spark.avgPruneRatio === 0 ? "No candidate was excluded under the recorded index/DSCP bounds." : "This value includes indexed baseline filtering plus the DSCP threshold. Use the paired baseline to isolate DSCP.")
+        : "This value is Rai-Lian indexed candidate filtering; this variant does not execute the DSCP extension."}</p>
     </div>
     <div class="detail-section"><h4>Query metrics</h4>
-      <table class="table"><thead><tr><th>Query</th><th>Pruned</th><th>tau</th><th>Emitted</th><th>AER</th><th>False prune</th></tr></thead><tbody>
-      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${hasDscp(spark.algorithm) ? `${query.pruned} / ${query.objects}` : "n/a"}</td><td>${hasDscp(spark.algorithm) ? escapeHtml(query.tau) : "n/a"}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${hasDscp(spark.algorithm) ? (query.falsePrunes ?? 0) : "n/a"}</td></tr>`).join("")}
+      <table class="table"><thead><tr><th>Query</th><th>Filtered</th><th>tau</th><th>Emitted</th><th>AER</th><th>False prune</th></tr></thead><tbody>
+      ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${query.pruned} / ${query.objects}</td><td>${hasDscp(spark.algorithm) ? escapeHtml(query.tau) : "index frontier"}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${query.falsePrunes ?? 0}</td></tr>`).join("")}
       </tbody></table>
     </div>
     <div class="detail-section"><h4>Validation</h4><p class="callout ${run.summary.exactAgreement === true ? "info" : "warning"}">
@@ -347,6 +359,11 @@ async function showRun(runId) {
       <div class="metric-row"><span>Shuffle records</span><strong>${Number(spark.totalShuffleRecords || 0).toLocaleString()}</strong></div>
       <div class="metric-row"><span>Filter / emission / refine ms</span><strong>${spark.totalFilterMs || 0} / ${spark.totalEmissionMs || 0} / ${spark.totalRefineMs || 0}</strong></div>
       <div class="metric-row"><span>Max straggler ratio</span><strong>${Number(spark.maxStragglerRatio || 0).toFixed(2)}</strong></div>
+    </div>
+    <div class="detail-section"><h4>DDR / MBR / AES trace sample</h4>
+      ${spark.objectTraces?.length ? `<table class="table"><thead><tr><th>Object</th><th>LB / UB / tau</th><th>Decision</th><th>Partial MBR refs</th><th>AES / baseline</th></tr></thead><tbody>
+      ${spark.objectTraces.slice(0, 25).map(trace => `<tr><td>${escapeHtml(trace.objectId)} (p${trace.partition})</td><td>${Number(trace.lb).toFixed(3)} / ${Number(trace.ub).toFixed(3)} / ${trace.tau == null ? "n/a" : Number(trace.tau).toFixed(3)}</td><td>${escapeHtml(trace.decision)}</td><td>${trace.partialMbrRefs}</td><td>${trace.aesEmissions} / ${trace.baselineEmissions}</td></tr>`).join("")}
+      </tbody></table>` : `<p class="subtle">This historical run predates object-level trace capture.</p>`}
     </div>
     <div class="detail-section"><h4>Spark log excerpt</h4><pre class="log">${escapeHtml(run.logs["spark.log"] || "No Spark log stored.")}</pre></div>
     <a class="button primary download" href="/api/runs/${encodeURIComponent(run.id)}/bundle">Export evidence bundle</a>`;

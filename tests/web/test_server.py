@@ -152,6 +152,15 @@ class ResearchApiTest(unittest.TestCase):
       self.assertIn("aes-dscp", report)
       self.assertIn("\\begin{tabular}", report)
 
+  def test_paper_figures_exposes_only_generated_svgs(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      (root / "observed.svg").write_text("<svg/>")
+      (root / "notes.md").write_text("not an image")
+      with patch.object(server, "FIGURE_ROOT", root):
+        figures = server.paper_figures()
+      self.assertEqual([{"name": "observed.svg", "url": "/api/reports/figures/observed.svg"}], figures)
+
 
 if __name__ == "__main__":
   unittest.main()

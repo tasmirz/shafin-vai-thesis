@@ -313,7 +313,7 @@
             <div id="runtime-chart" class="bar-chart"></div>
           </section>
           <section class="panel">
-            <h3>Average pruning ratio</h3>
+            <h3>Average candidate filtering ratio</h3>
             <div id="pruning-chart" class="bar-chart"></div>
           </section>
         </div>
@@ -321,6 +321,11 @@
           <h3>Communication metrics boundary</h3>
           <p class="callout info">Finite Spark runs now capture actual task-level shuffle bytes and records, phase timing, GC time and a straggler ratio. Report paper results only from comparable validated runs.</p>
           <div id="telemetry-summary"></div>
+        </section>
+        <section class="panel">
+          <h3>Paper-style comparable figures</h3>
+          <p class="subtle">Observed Spark figures are generated from saved evidence; published Hadoop values remain reference-only.</p>
+          <div id="paper-figures" class="paper-figures"></div>
         </section>
         <div class="two-column">
           <section class="panel">

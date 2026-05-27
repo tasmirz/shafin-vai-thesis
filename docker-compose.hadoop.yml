@@ -1,0 +1,66 @@
+services:
+  namenode:
+    build:
+      context: .
+      dockerfile: docker/hadoop/Dockerfile
+    image: thesis-hadoop:local
+    command: ["namenode"]
+    volumes:
+      - hadoop-name:/data/name
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+
+  datanode:
+    image: thesis-hadoop:local
+    depends_on:
+      - namenode
+    command: ["datanode"]
+    volumes:
+      - hadoop-data:/data/data
+    ports:
+      - "9864:9864"
+
+  resourcemanager:
+    image: thesis-hadoop:local
+    depends_on:
+      - namenode
+    command: ["resourcemanager"]
+    ports:
+      - "8088:8088"
+      - "8032:8032"
+
+  nodemanager:
+    image: thesis-hadoop:local
+    depends_on:
+      - resourcemanager
+      - datanode
+    command: ["nodemanager"]
+    volumes:
+      - hadoop-yarn:/data/yarn
+    ports:
+      - "8042:8042"
+
+  historyserver:
+    image: thesis-hadoop:local
+    depends_on:
+      - resourcemanager
+    command: ["historyserver"]
+    ports:
+      - "19888:19888"
+
+  hadoop-client:
+    image: thesis-hadoop:local
+    depends_on:
+      - namenode
+      - resourcemanager
+      - nodemanager
+    command: ["client", "bash", "-lc", "hdfs dfs -ls /"]
+    profiles: ["job"]
+    volumes:
+      - ./:/workspace:ro
+
+volumes:
+  hadoop-name:
+  hadoop-data:
+  hadoop-yarn:
