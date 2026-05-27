@@ -163,6 +163,41 @@
             <button class="button primary" type="submit">Launch stream run</button>
           </form>
         </div>
+        <form class="panel form-card" id="paper-suite-launch-form">
+          <div class="badge teal">Paper Comparison Setup</div>
+          <h3>Rai-Lian baseline and ICCIT Spark upgrade</h3>
+          <p class="subtle">Run a curated dataset as the indexed control, upgraded AES+DSCP method, paired comparison, or full ablation. Published Hadoop values remain reference-only.</p>
+          <div class="field-pair">
+            <label>Setup ID<input name="runId" required value="paper-paired-web"></label>
+            <label>Setup
+              <select name="setup">
+                <option value="rai-baseline">Spark Rai-Lian indexed baseline</option>
+                <option value="iccit-upgrade">Spark ICCIT AES + DSCP</option>
+                <option value="paired" selected>Paired baseline vs upgrade</option>
+                <option value="ablation">Full four-treatment ablation</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-pair">
+            <label>Curated profile
+              <select name="profile">
+                <option value="smartphone" selected>Smartphone, 20 queries</option>
+                <option value="road-smoke">Bangladesh OSM smoke</option>
+                <option value="road-full">Bangladesh OSM, 98,451 MBRs</option>
+                <option value="road-full-20q">Bangladesh OSM, 98,451 MBRs, fixed 20 queries</option>
+              </select>
+            </label>
+            <label>k<input type="number" min="1" name="k" value="10"></label>
+          </div>
+          <div class="field-pair">
+            <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
+            <label>Spark driver memory<input name="sparkDriverMemory" value="8g"></label>
+          </div>
+          <label class="check"><input type="checkbox" name="validateExact"> Enable exact oracle for validation-scale runs</label>
+          <label class="check"><input type="checkbox" name="allowFullRoad"> Confirm full OSM execution for the 98,451-object profile</label>
+          <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
+          <button class="button primary" type="submit">Launch paper setup</button>
+        </form>
         <div class="two-column">
           <form class="panel form-card" id="smartphone-generate-form">
             <div class="badge">Paper Dataset</div>

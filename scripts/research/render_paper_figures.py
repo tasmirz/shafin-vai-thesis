@@ -170,6 +170,26 @@ def main() -> None:
         f"{reduction(values, 'aes-dscp'):.2f}% |")
   lines.extend([
       "",
+      "## ICCIT Reference, Spark Baseline, And Spark Upgrade",
+      "",
+      "The `Spark indexed baseline` column is the implemented Rai-Lian-style distributed aR-tree",
+      "treatment executed through Spark without the ICCIT AES/DSCP extensions. The published ICCIT",
+      "figures were measured under Hadoop on different hardware and are reference values, not a",
+      "same-machine engine speed comparison.",
+      "",
+      "| Dataset | Published ICCIT Hadoop baseline | Published ICCIT Hadoop AES+DSCP | Spark indexed baseline | Spark AES+DSCP upgrade | Within-Spark reduction |",
+      "|---|---:|---:|---:|---:|---:|",
+  ])
+  for profile, document in documents.items():
+    values = document["values"]
+    reference = PAPER[profile]
+    label = "Synthetic smartphone" if profile == "smartphone" else "Bangladesh road"
+    lines.append(
+        f"| {label} | {reference['baseline']:,} ms | {reference['aes-dscp']:,} ms | "
+        f"{values['baseline']:,} ms | {values['aes-dscp']:,} ms | "
+        f"{reduction(values, 'aes-dscp'):.2f}% |")
+  lines.extend([
+      "",
       "## Figure Artifacts",
       "",
       "- `observed-spark-baseline-proposed.svg`: observed baseline/proposed comparison.",

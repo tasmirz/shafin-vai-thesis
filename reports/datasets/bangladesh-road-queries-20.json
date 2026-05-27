@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "artifact": "ptd-query-set",
+  "createdUtc": "2026-05-27T09:41:20.794124+00:00",
+  "querySetPath": "datasets-curated/bangladesh-road-queries-20.csv",
+  "querySetSha256": "1dc2646d960be4291ace34e8016ac3602509f046a8a48d3a369cfd9d312f4bac",
+  "datasetManifestPath": "reports/datasets/bangladesh-road-paper.json",
+  "datasetCsvSha256": "0852ba9827c99d439cf71f10cdac0eedd13e4ce8e0a9a7e1dcfe8dca8342df3c",
+  "queries": 20,
+  "dimensions": 2,
+  "seed": 42,
+  "distribution": "uniform within curated projected dataset extent",
+  "extent": [
+    293757.373,
+    406482.838,
+    770669.786,
+    948322.765
+  ]
+}

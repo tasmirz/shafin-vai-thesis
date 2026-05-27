@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "artifact": "ptd-query-set",
+  "createdUtc": "2026-05-27T09:59:31.101574+00:00",
+  "querySetPath": "datasets-curated/california-tiger-road-queries-20.csv",
+  "querySetSha256": "5e288e872d62f211f0d602f5eb216123403f88104c805ad2e3df8514e9f9e893",
+  "datasetManifestPath": "reports/datasets/california-tiger-road-paper.json",
+  "datasetCsvSha256": "eb552df05c822a73e8362cdca9f442867301b61d5fcfe5e9dd8470b5216e9b2f",
+  "queries": 20,
+  "dimensions": 2,
+  "seed": 42,
+  "distribution": "uniform within curated projected dataset extent",
+  "extent": [
+    97452.442,
+    -577067.835,
+    216242.377,
+    -352226.503
+  ]
+}

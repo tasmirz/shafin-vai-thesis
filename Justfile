@@ -10,7 +10,7 @@ dimensions := env_var_or_default("DIMENSIONS", "4")
 k := env_var_or_default("K", "10")
 missing_rate := env_var_or_default("MISSING_RATE", "0.35")
 rate_per_second := env_var_or_default("RATE_PER_SECOND", "200")
-qos := env_var_or_default("QOS", "0")
+qos := env_var_or_default("QOS", "1")
 expected_messages := env_var_or_default("EXPECTED_MESSAGES", "400")
 monitor_port := env_var_or_default("PORT", "8088")
 web_port := env_var_or_default("WEB_PORT", "8090")
@@ -111,9 +111,20 @@ iccit-compare:
       VALIDATE_EXACT="${VALIDATE_EXACT:-false}" BUILD_IMAGE="${BUILD_IMAGE:-1}" \
       scripts/research/run_iccit_comparison_suite.sh
 
+# run a named curated paper setup: rai-baseline, iccit-upgrade, paired, or ablation
+paper-setup:
+    PROFILE="${PROFILE:-smartphone}" SETUP="${SETUP:-paired}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \
+      VALIDATE_EXACT="${VALIDATE_EXACT:-false}" BUILD_IMAGE="${BUILD_IMAGE:-1}" \
+      scripts/research/run_paper_setup.sh
+
 # render ICCIT-shaped observed Spark figures from completed smartphone and road suites
 paper-figures smartphone_suite road_suite:
     python3 scripts/research/render_paper_figures.py --smartphone-suite {{ smartphone_suite }} --road-suite {{ road_suite }}
+
+# generate the publication-formatted Spark improvement and source-paper consistency report
+publication-report smartphone_suite="iccit-smartphone-str-20260527T073310Z" road_suite="iccit-road-full-20q-20260527T094500Z":
+    python3 scripts/research/render_paper_figures.py --smartphone-suite {{ smartphone_suite }} --road-suite {{ road_suite }}
+    python3 scripts/research/render_publication_report.py --smartphone-suite {{ smartphone_suite }} --road-suite {{ road_suite }}
 
 # validate locally supplied Bangladesh OSM roads against the paper curation protocol
 osm-prepare-check:
@@ -137,6 +148,16 @@ paper-smartphone:
 paper-osm:
     mkdir -p datasets-curated reports/datasets
     uv run --with pyproj scripts/research/build_paper_dataset.py osm --output datasets-curated/bangladesh-road-paper.csv --manifest reports/datasets/bangladesh-road-paper.json --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
+
+# curate the supplied Los Angeles County TIGER road source at the Rai-Lian real-data scale
+paper-california:
+    mkdir -p datasets-curated reports/datasets
+    uv run --with pyproj scripts/research/build_paper_dataset.py osm --source datasets-osm/tl_2018_06037_roads/tl_2018_06037_roads.shp --dataset-name california-tiger-la-road-mbr --source-crs EPSG:4269 --projected-crs EPSG:3310 --output datasets-curated/california-tiger-road-paper.csv --manifest reports/datasets/california-tiger-road-paper.json --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
+    python3 scripts/research/build_query_set.py --dataset-manifest reports/datasets/california-tiger-road-paper.json --output datasets-curated/california-tiger-road-queries-20.csv --manifest reports/datasets/california-tiger-road-queries-20.json --queries 20 --seed 42
+
+# compile selected immutable CSV treatment suites and stream runs into one report
+dataset-benchmark-report *args:
+    python3 scripts/research/render_dataset_benchmark_report.py {{ args }}
 
 # run MQTT -> Kafka -> Spark Structured Streaming E2E and save its artifacts
 stream-test:

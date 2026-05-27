@@ -17,6 +17,9 @@ import java.util.Locale;
 import java.util.Map;
 
 public final class CsvDatasetProvider implements DatasetProvider {
+  /** Query identifier assigned to immutable object instances evaluated against a sidecar query set. */
+  public static final String SHARED_QUERY_ID = "__shared_query_input__";
+
   @Override
   public String name() {
     return "csv";
@@ -30,10 +33,74 @@ public final class CsvDatasetProvider implements DatasetProvider {
     }
 
     try {
-      return readEvents(Path.of(datasetPath), config);
+      SimulationData data = readEvents(Path.of(datasetPath), config);
+      String querySetPath = args.stringValue("querySetPath", "").trim();
+      return querySetPath.isEmpty() ? data : withQuerySet(data, Path.of(querySetPath));
     } catch (IOException e) {
       throw new IllegalArgumentException("failed to read csv dataset: " + datasetPath, e);
     }
+  }
+
+  private SimulationData withQuerySet(SimulationData source, Path querySetPath) throws IOException {
+    Map<String, QueryPoint> queryPoints = readQuerySet(querySetPath);
+    if (queryPoints.isEmpty()) {
+      throw new IllegalArgumentException("query set is empty: " + querySetPath);
+    }
+    List<RawEvent> sharedEvents = source.events().stream()
+        .map(event -> new RawEvent(
+            event.objectId(),
+            event.instanceId(),
+            SHARED_QUERY_ID,
+            event.eventTime(),
+            event.appearanceProbability(),
+            event.serverPartition(),
+            event.attributes(),
+            event.missingMask(),
+            event.mbrMin(),
+            event.mbrMax(),
+            event.opType()))
+        .toList();
+    validateAppearanceProbabilities(sharedEvents);
+    return new SimulationData(sharedEvents, source.rules(), queryPoints);
+  }
+
+  private Map<String, QueryPoint> readQuerySet(Path path) throws IOException {
+    Map<String, QueryPoint> points = new LinkedHashMap<>();
+    try (BufferedReader reader = Files.newBufferedReader(path)) {
+      String headerLine = reader.readLine();
+      if (headerLine == null) {
+        return points;
+      }
+      String[] header = split(headerLine);
+      int queryId = requiredColumn(header, "queryId");
+      List<Integer> coordinates = new ArrayList<>();
+      for (int dimension = 0; ; dimension++) {
+        int column = optionalColumn(header, "queryA" + dimension);
+        if (column < 0) {
+          break;
+        }
+        coordinates.add(column);
+      }
+      if (coordinates.isEmpty()) {
+        throw new IllegalArgumentException("query set must provide queryA0,queryA1,... columns");
+      }
+      String rawLine;
+      while ((rawLine = reader.readLine()) != null) {
+        if (rawLine.isBlank() || rawLine.trim().startsWith("#")) {
+          continue;
+        }
+        String[] cells = split(rawLine);
+        String id = cell(cells, queryId);
+        double[] values = new double[coordinates.size()];
+        for (int dimension = 0; dimension < coordinates.size(); dimension++) {
+          values[dimension] = Double.parseDouble(cell(cells, coordinates.get(dimension)));
+        }
+        if (points.putIfAbsent(id, new QueryPoint(id, values)) != null) {
+          throw new IllegalArgumentException("query set contains duplicate query ID: " + id);
+        }
+      }
+    }
+    return points;
   }
 
   private SimulationData readEvents(Path path, SimulationConfig config) throws IOException {

@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CSV_PATH="${CSV_PATH:-$ROOT_DIR/tests/fixtures/csv/smartphone-small.csv}"
 DATASET_MANIFEST="${DATASET_MANIFEST:-}"
+QUERY_SET_PATH="${QUERY_SET_PATH:-}"
+QUERY_SET_MANIFEST="${QUERY_SET_MANIFEST:-}"
 RUN_ID="${RUN_ID:-csv-$(date -u +%Y%m%dT%H%M%SZ)}"
 K="${K:-2}"
 PARTITIONS="${PARTITIONS:-2}"
@@ -35,14 +37,24 @@ if [[ -e "$ROOT_DIR/reports/runs/$RUN_ID" ]]; then
   exit 1
 fi
 test -f "$CSV_PATH"
+if [[ -n "$QUERY_SET_PATH" ]]; then
+  test -f "$QUERY_SET_PATH"
+fi
 RUN_TMP="$(mktemp -d)"
 trap cleanup EXIT
 if [[ "$BUILD_IMAGE" == "1" || "$BUILD_IMAGE" == "true" ]]; then
   mvn -q -DskipTests package
   docker build -t thesis-topk-spark:local "$ROOT_DIR" >/dev/null
 fi
+query_mount=()
+query_arg=()
+if [[ -n "$QUERY_SET_PATH" ]]; then
+  query_mount=(-v "$QUERY_SET_PATH:/opt/spark/input/queries.csv:ro,Z")
+  query_arg=(--querySetPath=/opt/spark/input/queries.csv)
+fi
 docker run --rm \
   -v "$CSV_PATH:/opt/spark/input/events.csv:ro,Z" \
+  "${query_mount[@]}" \
   thesis-topk-spark:local \
   /opt/spark/bin/spark-submit \
   --master "$SPARK_MASTER" \
@@ -50,6 +62,7 @@ docker run --rm \
   --class com.thesis.topk.spark.ProbabilisticTopKSparkJob \
   /opt/spark/app/topk-spark.jar \
   --source=simulator --dataset=csv --datasetPath=/opt/spark/input/events.csv \
+  "${query_arg[@]}" \
   --k="$K" --partitions="$PARTITIONS" --seed="$SEED" --synopsisBins="$SYNOPSIS_BINS" \
   --algorithm="$ALGORITHM" \
   --traceLimit="$TRACE_LIMIT" \
@@ -94,11 +107,23 @@ archive_args=(
   --parameter "sparkMaster=$SPARK_MASTER"
   --parameter "traceLimit=$TRACE_LIMIT"
 )
+if [[ -n "$QUERY_SET_PATH" ]]; then
+  archive_args+=(--parameter "querySetPath=$QUERY_SET_PATH" --query-set-file "$QUERY_SET_PATH")
+fi
+if [[ -n "${SETUP_FAMILY:-}" ]]; then
+  archive_args+=(--parameter "setupFamily=$SETUP_FAMILY")
+fi
+if [[ -n "${SETUP_ROLE:-}" ]]; then
+  archive_args+=(--parameter "setupRole=$SETUP_ROLE")
+fi
 if [[ -f "$RUN_TMP/algorithm.log" ]]; then
   archive_args+=(--algorithm-log "$RUN_TMP/algorithm.log")
 fi
 if [[ -n "$DATASET_MANIFEST" ]]; then
   archive_args+=(--dataset-manifest "$DATASET_MANIFEST")
+fi
+if [[ -n "$QUERY_SET_MANIFEST" ]]; then
+  archive_args+=(--query-set-manifest "$QUERY_SET_MANIFEST")
 fi
 python3 scripts/research/archive_run.py "${archive_args[@]}"
 grep -E "^(engine=|rawEvents=|TopKResult\\{|query=)" "$RUN_TMP/spark.log"

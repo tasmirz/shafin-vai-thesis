@@ -1,5 +1,5 @@
 {
-  "generatedUtc": "2026-05-27T07:37:19.742844+00:00",
+  "generatedUtc": "2026-05-27T10:29:03.366076+00:00",
   "publishedReference": {
     "smartphone": {
       "baseline": 66520,
@@ -31,12 +31,12 @@
       }
     },
     "road-full": {
-      "suite": "iccit-road-full-str-20260527T073041Z",
+      "suite": "iccit-road-full-20q-20260527T094500Z",
       "values": {
-        "baseline": 18034,
-        "aes-only": 13728,
-        "dscp-only": 14493,
-        "aes-dscp": 12062
+        "baseline": 917176,
+        "aes-only": 519036,
+        "dscp-only": 603290,
+        "aes-dscp": 379637
       }
     }
   }

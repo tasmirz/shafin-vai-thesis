@@ -185,6 +185,22 @@ uv run --with pyproj scripts/research/build_paper_dataset.py osm \
   --output datasets-curated/bangladesh-road-paper.csv \
   --manifest reports/datasets/bangladesh-road-paper.json \
   --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
+python3 scripts/research/build_query_set.py \
+  --dataset-manifest reports/datasets/bangladesh-road-paper.json \
+  --output datasets-curated/bangladesh-road-queries-20.csv \
+  --manifest reports/datasets/bangladesh-road-queries-20.json \
+  --queries 20 --seed 42
+uv run --with pyproj scripts/research/build_paper_dataset.py osm \
+  --source datasets-osm/tl_2018_06037_roads/tl_2018_06037_roads.shp \
+  --dataset-name california-tiger-la-road-mbr --source-crs EPSG:4269 --projected-crs EPSG:3310 \
+  --output datasets-curated/california-tiger-road-paper.csv \
+  --manifest reports/datasets/california-tiger-road-paper.json \
+  --objects 98451 --instances-min 5 --instances-max 11 --queries 1 --partitions 8 --seed 42
+python3 scripts/research/build_query_set.py \
+  --dataset-manifest reports/datasets/california-tiger-road-paper.json \
+  --output datasets-curated/california-tiger-road-queries-20.csv \
+  --manifest reports/datasets/california-tiger-road-queries-20.json \
+  --queries 20 --seed 42
 python3 scripts/research/build_paper_dataset.py synthetic \
   --distribution zipf --zipf-skew 0.8 --lmax 10 \
   --output datasets-curated/rai-zipf.csv \
@@ -192,9 +208,14 @@ python3 scripts/research/build_paper_dataset.py synthetic \
   --objects 100000 --instances-min 2 --instances-max 10 --queries 1 --partitions 8 --seed 42
 ```
 
-The road generator converts line MBRs into EPSG:9678, uniformly samples 5-11 instances,
+The road generator converts line MBRs into a declared metric CRS, uniformly samples 5-11 instances,
 normalizes appearance probabilities, assigns each object to one seeded partition and records
-a partition index manifest. The `synthetic` generator implements Rai-Lian square uncertain
+a partition index manifest. Bangladesh OSM uses `EPSG:9678`; the supplied Los Angeles County
+TIGER source declares NAD83 and is projected to California Albers `EPSG:3310`. The TIGER
+artifact matches Rai-Lian's 98,451-object scale, but is not asserted to be their exact
+California road file. A sidecar query-set artifact evaluates the same immutable road
+instances against 20 fixed queries without copying every uncertain instance 20 times. The
+`synthetic` generator implements Rai-Lian square uncertain
 regions with uniform, Gaussian or Zipf center distributions and configurable `lmax`. The CSV
 provider consumes this evidence schema without discarding probabilities or server assignment.
 
@@ -233,7 +254,31 @@ Spark profile gathers distributed index summaries for broadcast:
 ```bash
 PROFILE=road-full ALLOW_FULL_ROAD=true SPARK_DRIVER_MEMORY=8g \
   VALIDATE_EXACT=false RUN_ID=road-full just iccit-compare
+
+# Paper-comparable fixed 20-query protocol over the immutable full road artifact
+PROFILE=road-full-20q ALLOW_FULL_ROAD=true SPARK_DRIVER_MEMORY=8g \
+  VALIDATE_EXACT=false RUN_ID=road-full-20q just iccit-compare
 ```
+
+Run a named curated paper setup when the experimental role should be explicit:
+
+```bash
+# Rai-Lian-style Spark indexed control only: no AES, no DSCP
+PROFILE=smartphone SETUP=rai-baseline RUN_ID=rai-control BUILD_IMAGE=0 just paper-setup
+
+# Paired current-machine control versus the Spark ICCIT AES+DSCP upgrade
+PROFILE=road-smoke SETUP=paired RUN_ID=road-paired \
+  VALIDATE_EXACT=true BUILD_IMAGE=0 just paper-setup
+
+# Full OSM paired execution is deliberately opt-in
+PROFILE=road-full SETUP=paired RUN_ID=road-full-paired ALLOW_FULL_ROAD=true \
+  SPARK_DRIVER_MEMORY=8g VALIDATE_EXACT=false BUILD_IMAGE=0 just paper-setup
+```
+
+`SETUP=rai-baseline` runs the Spark distributed aR-tree treatment without the ICCIT extensions;
+`SETUP=iccit-upgrade` runs AES+DSCP; `SETUP=paired` archives both and produces a comparison
+report; `SETUP=ablation` runs all four treatments. Published ICCIT Hadoop measurements remain
+reference values because the runtime and hardware differ from these Spark executions.
 
 Selectable algorithm IDs are `baseline`, `dscp-only`, `aes-only`, and `aes-dscp`.
 Each saved query records the executed emitted-record count, baseline/AES emission counts,
@@ -256,6 +301,20 @@ Run the actual stream route with a finite reproducible workload:
 ```bash
 RUN_ID=stream-baseline OBJECTS=12 QUERIES=2 DIMENSIONS=2 K=2 just stream-test
 ```
+
+Paper-shaped CSV records can also traverse the full MQTT -> Kafka -> Spark route without
+dropping appearance probabilities, partition IDs or MBRs:
+
+```bash
+RUN_ID=stream-paper-road-smoke DATASET=csv \
+  DATASET_PATH="$PWD/datasets-curated/bangladesh-road-smoke.csv" \
+  DATASET_MANIFEST="$PWD/reports/datasets/bangladesh-road-smoke.json" \
+  MAX_EVENTS=310 EXPECTED_MESSAGES=310 K=5 PARTITIONS=4 \
+  QOS=1 VALIDATE_EXACT=true scripts/e2e-benchmark.sh
+```
+
+For full-scale transport timings set `VALIDATE_EXACT=false RUN_LOCAL_ORACLE=false`; correctness
+evidence must be supplied by separate finite validation runs.
 
 Validate the separate Hadoop/HDFS/YARN MapReduce execution surface:
 
@@ -298,13 +357,13 @@ The dependency-free website is backed directly by the saved experiment evidence 
 - fair-comparison warnings when seeds, partitions, dataset hashes or other controls differ;
 - CSV record inspection, probability/MBR audit and input-quality summaries;
 - simulator controls and status manifests for smartphone and Bangladesh OSM road artifacts;
-- launch controls for the validated CSV and bounded streaming benchmark profiles;
+- launch controls for validated CSV, bounded streaming, and curated Rai-Lian/ICCIT paper setups;
 - exactness status, measured runtime/pruning/telemetry views, experiment matrix planning,
   LaTeX table export and downloadable evidence bundles.
 
 The site can launch all four treatment variants and compare saved AER/pruning/shuffle evidence.
-It does not claim the published reduction percentages until a controlled full-scale suite has
-been executed and reviewed.
+It separates the published Hadoop reference figures from completed same-machine Spark treatment
+comparisons rather than reporting unlike runtimes as engine speedups.
 
 Validate both its artifact logic and its served HTTP endpoints from the terminal:
 
@@ -392,6 +451,36 @@ Paper alignment report:
 ```text
 reports/validation/paper-alignment.md
 ```
+
+Publication-formatted performance and consistency report:
+
+```text
+reports/publication/performance-improvement-report.md
+reports/publication/spark-treatment-matrix.csv
+reports/publication/spark-treatment-table.tex
+reports/publication/all-dataset-benchmark-report.md
+reports/publication/all-dataset-treatment-matrix.csv
+reports/publication/all-dataset-stream-matrix.csv
+```
+
+Regenerate the paper-style figures and publication report from immutable suites:
+
+```bash
+just publication-report iccit-smartphone-str-20260527T073310Z iccit-road-full-20q-20260527T094500Z
+```
+
+The report treats published Hadoop values as literature references and reports only within-Spark
+treatment reductions. Generate a multi-source table, including separately measured stream
+routes, from immutable run IDs:
+
+```bash
+python3 scripts/research/render_dataset_benchmark_report.py \
+  --suite "Smartphone=iccit-smartphone-str-20260527T073310Z" \
+  --suite "Bangladesh OSM=iccit-road-full-20q-20260527T094500Z" \
+  --suite "California/TIGER LA=<completed-suite-id>" \
+  --stream "Bangladesh OSM=<completed-stream-run-id>"
+```
+
 Each new finite benchmark archives a bounded `object-traces.csv` sample containing per-object
 LB/UB/tau decisions, partial MBR references and AES versus expanded emission counts. Once a
 smartphone and road suite complete, render paper-shaped SVG evidence without mixing runtimes

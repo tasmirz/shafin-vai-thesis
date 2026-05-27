@@ -120,9 +120,27 @@ def generic_csv(args):
     for index, row in enumerate(reader):
       if index >= limit:
         return
-      yield record(
+      payload = record(
           row["objectId"], row["queryId"], int(row["eventTime"]),
           [number(row[name]) for name in attributes])
+      # Preserve paper-shaped uncertain-object metadata across MQTT/Kafka so stream
+      # runs execute the same MBR/indexed semantics as direct CSV runs.
+      if row.get("instanceId"):
+        payload["instanceId"] = row["instanceId"]
+      if row.get("probability"):
+        payload["appearanceProbability"] = float(row["probability"])
+      if row.get("serverId"):
+        payload["serverPartition"] = int(row["serverId"])
+      mbr_min = [
+          number(row[name]) for name in ("mbrMinX", "mbrMinY") if name in row
+      ]
+      mbr_max = [
+          number(row[name]) for name in ("mbrMaxX", "mbrMaxY") if name in row
+      ]
+      if len(mbr_min) == len(attributes) and len(mbr_max) == len(attributes):
+        payload["mbrMin"] = mbr_min
+        payload["mbrMax"] = mbr_max
+      yield payload
 
 
 PROVIDERS = {

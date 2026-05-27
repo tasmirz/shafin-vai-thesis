@@ -149,8 +149,9 @@ exact-agreement evidence under `reports/runs/<run-id>/`.
   aggregate-R-tree candidate elimination; DSCP treatments additionally record their extension
   threshold. Performance-only suites do not convert an unexecuted oracle into a correctness claim.
 - These are Spark treatment implementations with paper-shaped dataset artifacts and observed
-  runtime metrics; reproduction of paper percentages still requires running the controlled
-  full-scale suite and does not follow merely from data curation.
+  runtime metrics. The full Spark treatment suites have been executed; reproduction of the
+  published Hadoop percentages still requires genuine comparable Hadoop PTD executions and
+  does not follow merely from data curation.
 
 Validation-enabled Spark runs emit `validationPerformed=true exactAgreement=true` only after an
 oracle comparison; the attached local benchmark also records `topKAgreement`. These checks
@@ -171,9 +172,9 @@ configuration:
 | AES + DSCP | `ddr-mbr-full-possible` | 4 / 6 (66.67%) | 2 | true | 0 |
 
 Previously saved rows reporting `partition-local-conservative-no-mbr` and `0.0%` retain their
-historical meaning: their loose safe upper bounds did not prove `UB < tau`. The website now
-reports pruning as not applicable for variants that do not enable DSCP and exposes each run's
-bound mode in the evidence drawer.
+historical meaning: their loose safe upper bounds did not prove `UB < tau`. Current indexed runs
+show Rai-Lian-style candidate filtering for all treatments and the additional DSCP effect where
+enabled; the evidence drawer exposes each run's bound mode.
 
 The curated road smoke run `osm-mbr-smoke-20260526T151737Z-477089` uses 40 Bangladesh
 road-MBR objects and confirms the spatial path: `aes-dscp` pruned `16 / 40` objects (`40.0%`),
@@ -264,9 +265,9 @@ AES is beneficial on this input; DSCP filters few objects and its threshold over
 its small emission saving when executed alone. This measured Spark reduction does not reproduce
 the paper's `34.2%` Hadoop synthetic percentage.
 
-### Completed Full Bangladesh OSM Road Spark Treatments
+### Exploratory One-Query Bangladesh OSM Road Spark Treatments
 
-The completed suite `iccit-road-full-str-20260527T073041Z-*` executes `98,451` Bangladesh
+The exploratory suite `iccit-road-full-str-20260527T073041Z-*` executes `98,451` Bangladesh
 road-MBR objects and `787,342` normalized probabilistic instances with one stored query,
 `k=10`, eight partitions, and Spark `local[4]`.
 
@@ -286,3 +287,59 @@ Published Hadoop values remain reference values only. A Hadoop-vs-Spark engine c
 valid until the genuine Rai-Lian/ICCIT PTD MapReduce jobs are implemented and executed against
 these identical artifacts and configuration controls. Paper-style observed figures are generated
 under `reports/figures/`, with Hadoop references kept in a separate table.
+
+This suite contains one stored query and is retained for diagnostic history only.
+
+### Fixed 20-Query Bangladesh OSM Road Spark Treatments
+
+The completed suite `iccit-road-full-20q-20260527T094500Z-*` reuses the same `98,451` MBR
+objects and `787,342` normalized probabilistic instances through an immutable sidecar of `20`
+fixed query points, with `k=10`, eight partitions and Spark `local[4]`.
+
+| Treatment | Spark algorithm time | Reduction vs indexed Spark baseline | Candidate filtered | Emitted records | Shuffle bytes |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 917,176 ms | 0.00% | 97.94% | 123,247,562 | 3,230,578,777 |
+| AES-only | 519,036 ms | 43.41% | 97.94% | 2,602,824 | 1,740,157,693 |
+| DSCP-only | 603,290 ms | 34.22% | 98.88% | 69,191,990 | 2,464,051,421 |
+| AES + DSCP | 379,637 ms | 58.61% | 98.88% | 1,406,544 | 1,622,996,652 |
+
+On this fixed-query protocol, AES+DSCP is `58.61%` faster than the indexed Spark control,
+reduces emitted records by `98.86%`, and reduces measured shuffle bytes by `49.76%`.
+This is a within-Spark treatment result; it does not reproduce absolute ICCIT Hadoop time or
+constitute a Hadoop-versus-Spark engine comparison.
+
+### Supplemental California/TIGER Real-Road Source
+
+The supplied `datasets-osm/tl_2018_06037_roads` source contains `136,672` NAD83 line
+features. It is curated as a distinct Los Angeles County TIGER artifact using
+`EPSG:4269 -> EPSG:3310` projection, with the first `98,451` line MBRs sampled into
+`787,342` normalized uncertain instances. This matches the Rai-Lian real-data object count,
+but provenance is not sufficient to call it the exact California road file from that paper.
+
+The initial full-object one-query suite `california-tiger-full-1q-20260527T102800Z-*`
+provides supplemental stress evidence:
+
+| Treatment | Spark algorithm time | Reduction vs indexed Spark baseline | Emitted records | Shuffle bytes |
+|---|---:|---:|---:|---:|
+| Baseline | 67,722 ms | 0.00% | 10,739,830 | 222,140,075 |
+| AES-only | 46,540 ms | 31.28% | 142,696 | 95,833,795 |
+| DSCP-only | 37,376 ms | 44.81% | 5,577,038 | 150,601,712 |
+| AES + DSCP | 28,906 ms | 57.32% | 76,376 | 84,829,323 |
+
+Its fixed 20-query sidecar is curated but that longer treatment suite has not been executed;
+the one-query California result is therefore exploratory, not a final paper table.
+
+### MQTT/Kafka/Spark Transport Evidence
+
+Paper-shaped CSV transmission now preserves `instanceId`, appearance probability, server
+partition and MBR coordinates through MQTT and Kafka. QoS 1 is the default for saved transport
+benchmarks because an unlimited-rate QoS 0 diagnostic dropped messages and was discarded.
+
+| Stream run | Input scope | Spark algorithm time | End-to-end time | Exact agreement |
+|---|---:|---:|---:|---|
+| `stream-smartphone-full-qos1-20260527T104000Z` | 207,860 messages / 20 queries | 51,259 ms | 1,612,321 ms | not run |
+| `stream-bangladesh-road-smoke-qos1-20260527T110800Z` | 310 messages / 1 query | 2,529 ms | 16,181 ms | true |
+| `stream-california-tiger-smoke-qos1-20260527T103800Z` | 310 messages / 1 query | 1,652 ms | 14,110 ms | true |
+
+The full smartphone end-to-end time is dominated by acknowledged MQTT publication, so it is
+reported as a transport-path benchmark and not substituted for direct CSV algorithm timing.

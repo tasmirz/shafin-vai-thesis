@@ -246,14 +246,14 @@ def line_mbrs(path: Path, maximum: int):
       count += 1
 
 
-def transformer():
+def transformer(args):
   try:
     from pyproj import Transformer
   except ImportError as exc:
     raise SystemExit(
-        "OSM curation needs pyproj for EPSG:9678 conversion; run with "
+        "Road curation needs pyproj for projected MBR conversion; run with "
         "`uv run --with pyproj scripts/research/build_paper_dataset.py osm ...`.") from exc
-  return Transformer.from_crs("EPSG:4326", "EPSG:9678", always_xy=True)
+  return Transformer.from_crs(args.source_crs, args.projected_crs, always_xy=True)
 
 
 def projected_mbr(bounds, convert) -> tuple[float, float, float, float]:
@@ -278,7 +278,7 @@ def osm(args) -> dict:
     raise SystemExit(f"Road shapefile not found: {source}")
   output = Path(args.output)
   rng = random.Random(args.seed)
-  convert = transformer()
+  convert = transformer(args)
   index = make_index(args.partitions)
   row_count = 0
   object_count = 0
@@ -322,19 +322,19 @@ def osm(args) -> dict:
               "mbrMinY": f"{mbr[1]:.3f}",
               "mbrMaxX": f"{mbr[2]:.3f}",
               "mbrMaxY": f"{mbr[3]:.3f}",
-              "source": "bangladesh-osm-road-mbr",
+              "source": args.dataset_name,
           })
           row_count += 1
       object_count += 1
   finally:
     target.close()
   return dataset_manifest(
-      args, output, "bangladesh-osm-road-mbr", row_count, object_count, index,
+      args, output, args.dataset_name, row_count, object_count, index,
       {
           "sourcePath": str(source),
           "sourceSha256": digest(source),
-          "sourceCrs": "EPSG:4326",
-          "projectedCrs": "EPSG:9678",
+          "sourceCrs": args.source_crs,
+          "projectedCrs": args.projected_crs,
           "queryPolicy": "seeded uniformly sampled point within projected dataset extent",
           "samplePolicy": "uniform points inside each road-segment MBR",
       })
@@ -424,6 +424,9 @@ def main():
   roads = commands.add_parser("osm")
   generation_arguments(roads)
   roads.add_argument("--source", default=str(DEFAULT_ROADS))
+  roads.add_argument("--dataset-name", default="bangladesh-osm-road-mbr")
+  roads.add_argument("--source-crs", default="EPSG:4326")
+  roads.add_argument("--projected-crs", default="EPSG:9678")
   check = commands.add_parser("validate")
   check.add_argument("--input", required=True)
   args = parser.parse_args()

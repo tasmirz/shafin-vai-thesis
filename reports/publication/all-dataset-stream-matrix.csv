@@ -1,0 +1,4 @@
+dataset,run_id,dataset_sha256,algorithm,messages,queries,algorithm_ms,pipeline_total_ms,e2e_rate_msg_s,bound_mode,indexed_mbr_path,validation
+Synthetic smartphone (full 20 queries),stream-smartphone-full-qos1-20260527T104000Z,0a61890c2df7876d3960aecd26aa34aa9a80070eb27b0be37d048290c6525e71,aes-dscp,207860,20,51259,1612321,128.92,rai-lian-artree-selected-level-partial-reducer,True,
+Bangladesh OSM (exact 40-object transport),stream-bangladesh-road-smoke-qos1-20260527T110800Z,63e4b3d997593f1b8018281bcb58147be95ead07e128c25180f025eb61d2cd68,aes-dscp,310,1,2529,16181,19.16,rai-lian-artree-selected-level-partial-reducer,True,True
+California/TIGER LA (exact 40-object transport),stream-california-tiger-smoke-qos1-20260527T103800Z,9a4d4eb38713b09095bc068b5d347dd95cf2af75d898e3e34edc3c84cf5adf73,aes-dscp,310,1,1652,14110,21.97,rai-lian-artree-selected-level-partial-reducer,True,True

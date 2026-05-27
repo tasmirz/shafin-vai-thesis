@@ -37,6 +37,7 @@ curl -fsS "$BASE_URL/api/reports/latex" >"$TMP_DIR/results.tex"
 
 grep -q "PTD-BenchLab" "$TMP_DIR/index.html"
 grep -q "Runs &amp; Compare" "$TMP_DIR/index.html"
+grep -q "Rai-Lian baseline and ICCIT Spark upgrade" "$TMP_DIR/index.html"
 grep -q "\\.drawer" "$TMP_DIR/styles.css"
 grep -q "renderDashboard" "$TMP_DIR/app.js"
 python3 - "$TMP_DIR/dashboard.json" "$TMP_DIR/csv.json" "$TMP_DIR/paper.csv.json" "$TMP_DIR/osm.json" "$TMP_DIR/matrix.json" <<'PY'

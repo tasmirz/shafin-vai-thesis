@@ -8,7 +8,7 @@ from unittest.mock import patch
 from web import server
 
 
-def write_run(root, run_id, partitions=2, elapsed=100, exact=True):
+def write_run(root, run_id, partitions=2, elapsed=100, exact=True, setup_role=None):
   path = root / run_id
   path.mkdir()
   manifest = {
@@ -19,6 +19,8 @@ def write_run(root, run_id, partitions=2, elapsed=100, exact=True):
       "dataset": {"sha256": "fixture"},
       "artifacts": ["manifest.json", "metrics.json"],
   }
+  if setup_role:
+    manifest["parameters"]["setupRole"] = setup_role
   metrics = {
       "spark": {
           "source": "simulator",
@@ -57,6 +59,11 @@ class ResearchApiTest(unittest.TestCase):
     self.assertTrue(profile["probabilityAudit"]["passed"])
     self.assertEqual(0, profile["probabilityAudit"]["normalizationErrors"])
 
+  def test_query_set_manifests_are_not_rendered_as_datasets(self):
+    datasets = server.paper_datasets()
+    self.assertTrue(datasets)
+    self.assertTrue(all("dataset" in item and "validation" in item for item in datasets))
+
   def test_run_comparison_flags_partition_change(self):
     with tempfile.TemporaryDirectory() as folder:
       root = Path(folder)
@@ -86,6 +93,36 @@ class ResearchApiTest(unittest.TestCase):
       with patch.object(server, "RUN_ROOT", root):
         run = server.load_run("bounded")
       self.assertEqual("ddr-mbr-full-possible", run["summary"]["boundMode"])
+
+  def test_saved_run_exposes_paper_setup_role(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "control", setup_role="rai-lian-baseline")
+      with patch.object(server, "RUN_ROOT", root):
+        run = server.load_run("control")
+      self.assertEqual("rai-lian-baseline", run["summary"]["setupRole"])
+
+  def test_legacy_nan_trace_is_normalized_before_browser_serialization(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "legacy-nan")
+      path = root / "legacy-nan" / "metrics.json"
+      metrics = json.loads(path.read_text())
+      metrics["spark"]["objectTraces"] = [{"objectId": "a", "tau": float("nan")}]
+      path.write_text(json.dumps(metrics))
+      with patch.object(server, "RUN_ROOT", root):
+        run = server.load_run("legacy-nan")
+      payload = json.dumps(run, allow_nan=False)
+      self.assertIn('"tau": null', payload)
+
+  def test_run_archive_payload_does_not_include_large_detail_metrics(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "summary-only")
+      with patch.object(server, "RUN_ROOT", root):
+        runs = server.list_runs()
+      self.assertNotIn("metrics", runs[0])
+      self.assertIn("summary", runs[0])
 
   def test_bundle_includes_stored_artifacts(self):
     with tempfile.TemporaryDirectory() as folder:
@@ -131,6 +168,54 @@ class ResearchApiTest(unittest.TestCase):
           str(job_root / job["jobId"] / "e2e"),
           captured["env"]["E2E_REPORT_DIR"])
       self.assertEqual("aes-dscp", captured["env"]["ALGORITHM"])
+
+  def test_paper_setup_launch_selects_rai_lian_baseline_profile(self):
+    captured = {}
+
+    class CompletedProcess:
+      def wait(self):
+        return 0
+
+    def fake_popen(command, **kwargs):
+      captured["command"] = command
+      captured["env"] = kwargs["env"]
+      return CompletedProcess()
+
+    with tempfile.TemporaryDirectory() as folder:
+      run_root = Path(folder) / "runs"
+      job_root = Path(folder) / "jobs"
+      run_root.mkdir()
+      with (
+          patch.object(server, "RUN_ROOT", run_root),
+          patch.object(server, "JOB_ROOT", job_root),
+          patch.object(server.subprocess, "Popen", side_effect=fake_popen),
+      ):
+        server.launch_job({
+            "mode": "paper-suite",
+            "runId": "rai-baseline-web",
+            "setup": "rai-baseline",
+            "profile": "road-smoke",
+            "k": 5,
+            "partitions": 4,
+            "sparkDriverMemory": "4g",
+        })
+        time.sleep(0.01)
+      self.assertTrue(captured["command"][0].endswith("scripts/research/run_paper_setup.sh"))
+      self.assertEqual("rai-baseline", captured["env"]["SETUP"])
+      self.assertEqual("road-smoke", captured["env"]["PROFILE"])
+      self.assertEqual("4g", captured["env"]["SPARK_DRIVER_MEMORY"])
+
+  def test_full_paper_osm_setup_requires_explicit_confirmation(self):
+    with tempfile.TemporaryDirectory() as folder:
+      with patch.object(server, "RUN_ROOT", Path(folder)):
+        for profile in ("road-full", "road-full-20q"):
+          with self.assertRaisesRegex(ValueError, "Confirm full OSM"):
+            server.launch_job({
+                "mode": "paper-suite",
+                "runId": f"{profile}-no-confirm",
+                "setup": "paired",
+                "profile": profile,
+            })
 
   def test_launch_rejects_unknown_algorithm(self):
     with tempfile.TemporaryDirectory() as folder:

@@ -9,6 +9,7 @@ import com.thesis.topk.algorithm.index.AggregateRTree.Inspection;
 import com.thesis.topk.algorithm.index.AggregateRTree.LevelSelection;
 import com.thesis.topk.algorithm.index.AggregateRTree.NodeReference;
 import com.thesis.topk.algorithm.variant.PtdAlgorithm;
+import com.thesis.topk.dataset.CsvDatasetProvider;
 import com.thesis.topk.algorithm.variant.PtdAlgorithmRegistry;
 import com.thesis.topk.model.CandidateScore;
 import com.thesis.topk.model.OpType;
@@ -133,7 +134,8 @@ public final class SparkTopKEngine {
       int traceLimit,
       SparkTaskMetrics observedMetrics) {
     JavaRDD<ProbabilisticInstance> queryInstances = allInstances
-        .filter(instance -> instance.queryId().equals(queryPoint.queryId()))
+        .filter(instance -> instance.queryId().equals(queryPoint.queryId())
+            || instance.queryId().equals(CsvDatasetProvider.SHARED_QUERY_ID))
         .persist(StorageLevel.MEMORY_AND_DISK_SER());
 
     long queryInstanceCount = queryInstances.count();

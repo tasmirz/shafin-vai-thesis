@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "dataset": "california-tiger-la-road-mbr",
+  "createdUtc": "2026-05-27T09:59:21.704936+00:00",
+  "csvPath": "datasets-curated/california-tiger-road-paper.csv",
+  "csvSha256": "eb552df05c822a73e8362cdca9f442867301b61d5fcfe5e9dd8470b5216e9b2f",
+  "objects": 98451,
+  "rows": 787342,
+  "queries": 1,
+  "instancesPerObject": {
+    "minimum": 5,
+    "maximum": 11
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 8,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 12349,
+      "instances": 99292,
+      "mbr": [
+        97561.314,
+        -573916.788,
+        216242.377,
+        -352796.521
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 12373,
+      "instances": 98602,
+      "mbr": [
+        97568.655,
+        -577067.835,
+        215828.357,
+        -352305.822
+      ]
+    },
+    {
+      "serverId": 2,
+      "objects": 12309,
+      "instances": 98779,
+      "mbr": [
+        97500.334,
+        -573746.236,
+        215867.145,
+        -352226.503
+      ]
+    },
+    {
+      "serverId": 3,
+      "objects": 12331,
+      "instances": 98688,
+      "mbr": [
+        97452.442,
+        -576657.949,
+        215481.661,
+        -352711.146
+      ]
+    },
+    {
+      "serverId": 4,
+      "objects": 12424,
+      "instances": 99349,
+      "mbr": [
+        98409.204,
+        -576780.946,
+        216242.377,
+        -352292.784
+      ]
+    },
+    {
+      "serverId": 5,
+      "objects": 12229,
+      "instances": 97374,
+      "mbr": [
+        98247.037,
+        -576842.143,
+        215834.781,
+        -352266.935
+      ]
+    },
+    {
+      "serverId": 6,
+      "objects": 12302,
+      "instances": 98519,
+      "mbr": [
+        97453.183,
+        -570518.254,
+        215869.05,
+        -352379.33
+      ]
+    },
+    {
+      "serverId": 7,
+      "objects": 12134,
+      "instances": 96739,
+      "mbr": [
+        97453.183,
+        -576584.581,
+        216107.655,
+        -352842.093
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 787342,
+    "objectQueryGroups": 98451,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "sourcePath": "datasets-osm/tl_2018_06037_roads/tl_2018_06037_roads.shp",
+  "sourceSha256": "febee4baa2e4e16321fe7ead26cf2b478c11db156bfa31b65c899b7b2d9da636",
+  "sourceCrs": "EPSG:4269",
+  "projectedCrs": "EPSG:3310",
+  "queryPolicy": "seeded uniformly sampled point within projected dataset extent",
+  "samplePolicy": "uniform points inside each road-segment MBR"
+}

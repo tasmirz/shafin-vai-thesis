@@ -45,14 +45,14 @@ PAPER_TARGETS = [
         "baselineMs": 66520,
         "proposedMs": 43757,
         "reductionPct": 34.2,
-        "status": "Paper-shaped generator and probability audit available; execute full sweep for reproduction",
+        "status": "Published Hadoop reference; observed Spark suite available in generated figures (12.61% within-Spark reduction)",
     },
     {
         "dataset": "Bangladesh road / OSM",
         "baselineMs": 56274,
         "proposedMs": 42366,
         "reductionPct": 24.7,
-        "status": "OSM MBR generator implemented; execute curated benchmark suite for reproduction",
+        "status": "Published Hadoop reference; fixed 20-query Bangladesh Spark suite records 58.61% within-Spark reduction",
     },
 ]
 
@@ -88,7 +88,9 @@ def require_run_id(run_id: str) -> str:
 
 
 def json_file(path: Path) -> dict:
-  return json.loads(path.read_text())
+  # Earlier run artifacts wrote Java NaN thresholds for variants without DSCP.
+  # Python accepts them by default, but JSON.parse in browsers rejects the API payload.
+  return json.loads(path.read_text(), parse_constant=lambda _value: None)
 
 
 def run_dir(run_id: str) -> Path:
@@ -117,6 +119,8 @@ def load_run(run_id: str, include_logs: bool = False) -> dict:
           "k": spark.get("k"),
           "partitions": spark.get("partitions"),
           "algorithm": spark.get("algorithm"),
+          "setupFamily": manifest.get("parameters", {}).get("setupFamily"),
+          "setupRole": manifest.get("parameters", {}).get("setupRole"),
           "boundMode": spark.get("boundMode"),
           "algorithmElapsedMs": spark.get("algorithmElapsedMs"),
           "validationMs": spark.get("validationMs"),
@@ -152,7 +156,11 @@ def list_runs() -> list[dict]:
   for candidate in RUN_ROOT.iterdir():
     if candidate.is_dir() and (candidate / "manifest.json").exists():
       try:
-        items.append(load_run(candidate.name))
+        item = load_run(candidate.name)
+        # Archive tables only require summaries. Full traces and per-query results belong in
+        # the selected-run endpoint and make the initial website payload unnecessarily large.
+        item.pop("metrics", None)
+        items.append(item)
       except (OSError, KeyError, json.JSONDecodeError):
         continue
   return sorted(items, key=lambda item: item.get("createdUtc") or "", reverse=True)
@@ -295,6 +303,8 @@ def paper_datasets() -> list[dict]:
   for path in DATASET_MANIFEST_ROOT.glob("*.json"):
     try:
       document = json_file(path)
+      if "dataset" not in document or "validation" not in document:
+        continue
       document["manifestPath"] = str(path.relative_to(ROOT))
       documents.append(document)
     except (OSError, json.JSONDecodeError):
@@ -409,6 +419,7 @@ def dashboard() -> dict:
               "Immutable run archive and comparison hygiene",
               "Artifact bundle export",
               "Selectable baseline, DSCP-only, AES-only and AES + DSCP treatments",
+              "Curated Rai-Lian baseline versus ICCIT Spark-upgrade setup launcher",
               "Executed emission counts, AER and DSCP false-prune audit",
               "Paper-shaped smartphone and Bangladesh road MBR dataset builders",
               "Probability normalization and MBR containment audit",
@@ -417,7 +428,7 @@ def dashboard() -> dict:
               "Heap-ordered aggregate-R-tree candidate traversal with indexed false-prune audit",
           ],
           "pending": [
-              "Full published-scale benchmark execution and paper-number reproduction",
+              "Byte-faithful historical-query calibration for Rai-Lian exported-level selection",
               "Same-machine Hadoop execution matrix against Spark treatments",
           ],
       },
@@ -467,13 +478,15 @@ JOB_LOCK = threading.Lock()
 
 def launch_job(payload: dict) -> dict:
   mode = payload.get("mode")
-  if mode not in {"csv", "stream", "smartphone", "osm"}:
-    raise ValueError("Mode must be csv, stream, smartphone or osm.")
+  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite"}:
+    raise ValueError("Mode must be csv, stream, smartphone, osm or paper-suite.")
   run_id = require_run_id(str(payload.get("runId", "")))
   if mode in {"csv", "stream"} and (RUN_ROOT / run_id).exists():
     raise ValueError("A saved run already exists with this ID.")
   if mode in {"smartphone", "osm"} and (DATASET_MANIFEST_ROOT / f"{run_id}.json").exists():
     raise ValueError("A generated dataset already exists with this ID.")
+  if mode == "paper-suite" and any(RUN_ROOT.glob(f"{run_id}-*")):
+    raise ValueError("A saved paper-setup run already exists with this setup ID.")
   with JOB_LOCK:
     if any(job.run_id == run_id and job.status == "running" for job in JOBS.values()):
       raise ValueError("A running job already uses this run ID.")
@@ -510,7 +523,7 @@ def launch_job(payload: dict) -> dict:
         "E2E_REPORT_DIR": str(JOB_ROOT / job_id / "e2e"),
     })
     command = [str(ROOT / "tests" / "e2e" / "test_mqtt_kafka_spark.sh")]
-  else:
+  elif mode in {"smartphone", "osm"}:
     output = DATASET_ROOT / f"{run_id}.csv"
     manifest = DATASET_MANIFEST_ROOT / f"{run_id}.json"
     instances_min = positive_int(payload.get("instancesMin", 5), "instancesMin")
@@ -531,6 +544,30 @@ def launch_job(payload: dict) -> dict:
     command = (
         [sys.executable, script, "smartphone", *common] if mode == "smartphone"
         else ["uv", "run", "--with", "pyproj", script, "osm", *common])
+  else:
+    setup = str(payload.get("setup", "paired")).lower()
+    if setup not in {"rai-baseline", "iccit-upgrade", "paired", "ablation"}:
+      raise ValueError("setup must be rai-baseline, iccit-upgrade, paired or ablation.")
+    profile = str(payload.get("profile", "smartphone")).lower()
+    if profile not in {"smartphone", "road-smoke", "road-full", "road-full-20q"}:
+      raise ValueError("profile must be smartphone, road-smoke, road-full or road-full-20q.")
+    allow_full_road = payload.get("allowFullRoad") in {True, "on", "true"}
+    if profile in {"road-full", "road-full-20q"} and not allow_full_road:
+      raise ValueError("Confirm full OSM execution before launching the 98,451-object profile.")
+    driver_memory = str(payload.get("sparkDriverMemory", "8g")).lower()
+    if not re.fullmatch(r"[1-9][0-9]*[gm]", driver_memory):
+      raise ValueError("sparkDriverMemory must be a positive size such as 4g or 8192m.")
+    env.update({
+        "SETUP": setup,
+        "PROFILE": profile,
+        "SUITE_ID": run_id,
+        "K": positive_int(payload.get("k", 10), "k"),
+        "PARTITIONS": positive_int(payload.get("partitions", 8), "partitions"),
+        "SPARK_DRIVER_MEMORY": driver_memory,
+        "VALIDATE_EXACT": "true" if payload.get("validateExact") in {True, "on", "true"} else "false",
+        "ALLOW_FULL_ROAD": "true" if allow_full_road else "false",
+    })
+    command = [str(ROOT / "scripts" / "research" / "run_paper_setup.sh")]
   log_path = JOB_ROOT / f"{job_id}.log"
   job = Job(job_id, run_id, mode, "running", command, utc_now(), log_path)
   log = log_path.open("w")
@@ -588,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
     print(f"[web] {self.address_string()} {format_string % args}")
 
   def send_json(self, document, status=HTTPStatus.OK):
-    body = json.dumps(document).encode()
+    body = json.dumps(document, allow_nan=False).encode()
     self.send_response(status)
     self.send_header("Content-Type", "application/json; charset=utf-8")
     self.send_header("Content-Length", str(len(body)))

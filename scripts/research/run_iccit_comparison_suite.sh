@@ -40,8 +40,21 @@ case "$PROFILE" in
       exit 2
     fi
     ;;
+  road-full-20q)
+    CSV_PATH="${CSV_PATH:-$ROOT_DIR/datasets-curated/bangladesh-road-paper.csv}"
+    DATASET_MANIFEST="${DATASET_MANIFEST:-$ROOT_DIR/reports/datasets/bangladesh-road-paper.json}"
+    QUERY_SET_PATH="${QUERY_SET_PATH:-$ROOT_DIR/datasets-curated/bangladesh-road-queries-20.csv}"
+    QUERY_SET_MANIFEST="${QUERY_SET_MANIFEST:-$ROOT_DIR/reports/datasets/bangladesh-road-queries-20.json}"
+    PAPER_BASELINE_MS=56274
+    PAPER_PROPOSED_MS=42366
+    PAPER_REDUCTION=24.7
+    if [[ "${ALLOW_FULL_ROAD:-false}" != "true" ]]; then
+      echo "road-full-20q requires ALLOW_FULL_ROAD=true because it executes 98,451 MBR objects over 20 queries." >&2
+      exit 2
+    fi
+    ;;
   *)
-    echo "Unknown PROFILE '$PROFILE'; use smartphone, road-smoke or road-full." >&2
+    echo "Unknown PROFILE '$PROFILE'; use smartphone, road-smoke, road-full or road-full-20q." >&2
     exit 1
     ;;
 esac
@@ -49,6 +62,10 @@ esac
 cd "$ROOT_DIR"
 test -f "$CSV_PATH"
 test -f "$DATASET_MANIFEST"
+if [[ -n "${QUERY_SET_PATH:-}" ]]; then
+  test -f "$QUERY_SET_PATH"
+  test -f "$QUERY_SET_MANIFEST"
+fi
 
 echo "Running same-machine ICCIT treatment comparison."
 echo "profile=$PROFILE k=$K partitions=$PARTITIONS validateExact=$VALIDATE_EXACT"
@@ -58,6 +75,7 @@ echo "traceLimit=$TRACE_LIMIT"
 echo "The ICCIT paper does not publish k, partition count or query seeds; these are declared protocol assumptions."
 
 SUITE_ID="$SUITE_ID" CSV_PATH="$CSV_PATH" DATASET_MANIFEST="$DATASET_MANIFEST" \
+  QUERY_SET_PATH="${QUERY_SET_PATH:-}" QUERY_SET_MANIFEST="${QUERY_SET_MANIFEST:-}" \
   K="$K" PARTITIONS="$PARTITIONS" VALIDATE_EXACT="$VALIDATE_EXACT" \
   REQUIRE_EXACT="$VALIDATE_EXACT" REQUIRE_PRUNING=false \
   REUSE_EXISTING_RUNS="${REUSE_EXISTING_RUNS:-false}" BUILD_IMAGE="$BUILD_IMAGE" \

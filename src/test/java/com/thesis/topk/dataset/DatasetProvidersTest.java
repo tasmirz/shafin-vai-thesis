@@ -76,6 +76,33 @@ class DatasetProvidersTest {
   }
 
   @Test
+  void csvProviderLoadsSidecarQueriesWithoutDuplicatingPaperInstances() throws Exception {
+    Path csv = tempDir.resolve("paper.csv");
+    Path queries = tempDir.resolve("queries.csv");
+    Files.writeString(csv, """
+        objectId,instanceId,probability,serverId,queryId,eventTime,opType,queryA0,queryA1,a0,a1,mbrMinX,mbrMinY,mbrMaxX,mbrMaxY
+        road-1,road-1-i0,0.4,2,q0,1000,UPSERT,5.0,6.0,1.0,2.0,1.0,2.0,1.1,2.1
+        road-1,road-1-i1,0.6,2,q0,1001,UPSERT,5.0,6.0,1.1,2.1,1.0,2.0,1.1,2.1
+        """);
+    Files.writeString(queries, """
+        queryId,queryA0,queryA1
+        q0,5.0,6.0
+        q1,7.0,8.0
+        """);
+
+    SimulationData data = DatasetProviders.generate(
+        Args.parse(new String[] {
+            "--dataset=csv", "--datasetPath=" + csv, "--querySetPath=" + queries
+        }));
+
+    assertThat(data.events()).hasSize(2);
+    assertThat(data.events()).extracting(event -> event.queryId())
+        .containsOnly(CsvDatasetProvider.SHARED_QUERY_ID);
+    assertThat(data.queryPoints()).containsKeys("q0", "q1");
+    assertThat(data.queryPoints().get("q1").coordinates()).containsExactly(7.0, 8.0);
+  }
+
+  @Test
   void csvProviderRejectsNonNormalizedPaperObject() throws Exception {
     Path csv = tempDir.resolve("invalid-paper.csv");
     Files.writeString(csv, """

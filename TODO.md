@@ -91,6 +91,12 @@
 - [x] Evaluate dynamic load balancing and worker-utilization/skew metrics inspired by `papers/3700838.3700859.pdf` using partition manifests and observed Spark straggler ratios.
 - [x] Persist bounded per-object DDR/MBR decision and AES emission trace samples for each saved Spark run.
 - [x] Generate paper-style observed-treatment figures while separating published Hadoop reference values.
+- [x] Add a curated paper-setup launcher for the Spark Rai-Lian indexed baseline, ICCIT AES+DSCP upgrade, paired comparison and full ablation.
+- [x] Generate a publication-formatted performance/consistency report with CSV and LaTeX tables from immutable Spark suites.
+- [x] Curate the supplied California/TIGER road source with declared CRS conversion and a fixed 20-query sidecar.
+- [x] Preserve paper uncertain-object probability/partition/MBR fields over MQTT -> Kafka -> Spark and validate exact road-subset transport runs.
+- [x] Compile multi-dataset CSV and stream benchmark matrices under `reports/publication/`.
+- [ ] Execute the California/TIGER full-object fixed 20-query treatment suite; the archived one-query suite is supplemental exploratory evidence only.
 
 ## 12. Full Baseline Reproduction Boundary
 
@@ -103,6 +109,8 @@
 - [x] Add heap-ordered local aR-tree candidate traversal for Rai-Lian mapper-side score-bound filtering.
 - [ ] Add offline persisted historical/uniform query-log calibration if a byte-faithful Rai-Lian exported-level selection baseline is required.
 - [ ] Implement the Rai-Lian/ICCIT algorithm as genuine Hadoop MapReduce jobs before labeling any Hadoop-vs-Spark timing as an engine comparison.
+- [x] Execute the 98,451-object Bangladesh OSM four-treatment suite over a fixed 20-query set; archived under `iccit-road-full-20q-20260527T094500Z-*`.
+- [ ] Add repetitions and confidence intervals before using the fixed 20-query Bangladesh suite as a final statistical paper-comparable result.
 - [x] Complete the 98,451-object Bangladesh road Spark treatment suite using heap-ordered local
   aR-tree traversal, STR spatial packing and lazy reducer partial scoring. The completed
   four-treatment suite is archived under `iccit-road-full-str-20260527T073041Z-*`; the

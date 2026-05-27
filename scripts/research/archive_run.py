@@ -188,6 +188,8 @@ def main():
   parser.add_argument("--e2e-summary")
   parser.add_argument("--dataset-file")
   parser.add_argument("--dataset-manifest")
+  parser.add_argument("--query-set-file")
+  parser.add_argument("--query-set-manifest")
   parser.add_argument("--parameter", action="append", default=[])
   args = parser.parse_args()
   if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.run_id):
@@ -226,9 +228,19 @@ def main():
   if args.dataset_manifest:
     shutil.copyfile(args.dataset_manifest, run_dir / "dataset-manifest.json")
     manifest["artifacts"].append("dataset-manifest.json")
+  if args.query_set_file:
+    shutil.copyfile(args.query_set_file, run_dir / "query-set.csv")
+    manifest["querySet"] = {
+        "path": args.query_set_file,
+        "sha256": sha256(args.query_set_file),
+    }
+    manifest["artifacts"].append("query-set.csv")
+  if args.query_set_manifest:
+    shutil.copyfile(args.query_set_manifest, run_dir / "query-set-manifest.json")
+    manifest["artifacts"].append("query-set-manifest.json")
 
-  (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-  (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+  (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
+  (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, allow_nan=False) + "\n")
   query_rows = metrics["spark"]["queries"]
   with (run_dir / "metrics.csv").open("w", newline="") as target:
     writer = csv.DictWriter(target, fieldnames=[
@@ -276,7 +288,7 @@ def main():
       writer.writeheader()
       writer.writerows(traces)
     manifest["artifacts"].append("object-traces.csv")
-    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+  (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
   print(f"savedRun={run_dir.relative_to(ROOT)}")
 
 

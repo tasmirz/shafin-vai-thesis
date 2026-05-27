@@ -1,0 +1,86 @@
+{
+  "generatedUtc": "2026-05-27T14:08:30.979054+00:00",
+  "sources": [
+    "papers/An_Efficient_Distributed_Framework_for_Top-k_Dominating_Query_Over_Uncertain_Databases.pdf",
+    "papers/s10115-023-01917-3(Target Paper).pdf"
+  ],
+  "publishedReference": {
+    "smartphone": {
+      "label": "Synthetic smartphone",
+      "baseline": 66520,
+      "aes-only": 44760,
+      "dscp-only": 58484,
+      "aes-dscp": 43757,
+      "act_cc": "1.4179 x 10^11",
+      "full_reduction": 34.2
+    },
+    "road": {
+      "label": "Bangladesh OSM road",
+      "baseline": 56274,
+      "aes-only": 42967,
+      "dscp-only": 46848,
+      "aes-dscp": 42366,
+      "act_cc": "1.543 x 10^10",
+      "full_reduction": 24.7
+    }
+  },
+  "sameMachineSparkResults": [
+    {
+      "profile": "smartphone",
+      "dataset": "Synthetic smartphone",
+      "suite_id": "iccit-smartphone-str-20260527T073310Z",
+      "objects_per_query": 750,
+      "instances": 207860,
+      "queries": 20,
+      "k": 10,
+      "partitions": 8,
+      "baseline_ms": 41800,
+      "aes_only_ms": 37050,
+      "dscp_only_ms": 43303,
+      "full_ms": 36527,
+      "aes_only_reduction": 11.363636363636363,
+      "dscp_only_reduction": -3.5956937799043063,
+      "full_reduction": 12.614832535885167,
+      "emission_reduction": 74.68322540650657,
+      "shuffle_reduction": 32.26753235513601,
+      "baseline_filtered": 0.0,
+      "full_filtered": 3.053,
+      "baseline_emissions": 6358938,
+      "full_emissions": 1609878,
+      "baseline_shuffle": 151550746,
+      "full_shuffle": 102649060,
+      "validation_performed": false
+    },
+    {
+      "profile": "road",
+      "dataset": "Bangladesh OSM road",
+      "suite_id": "iccit-road-full-20q-20260527T094500Z",
+      "objects_per_query": 98451,
+      "instances": 787342,
+      "queries": 20,
+      "k": 10,
+      "partitions": 8,
+      "baseline_ms": 917176,
+      "aes_only_ms": 519036,
+      "dscp_only_ms": 603290,
+      "full_ms": 379637,
+      "aes_only_reduction": 43.40933474055143,
+      "dscp_only_reduction": 34.22309349568676,
+      "full_reduction": 58.608053416138226,
+      "emission_reduction": 98.85876525492651,
+      "shuffle_reduction": 49.76142778022095,
+      "baseline_filtered": 97.93549999999999,
+      "full_filtered": 98.8825,
+      "baseline_emissions": 123247562,
+      "full_emissions": 1406544,
+      "baseline_shuffle": 3230578777,
+      "full_shuffle": 1622996652,
+      "validation_performed": false
+    }
+  ],
+  "fairnessIssues": {
+    "smartphone": [],
+    "road": []
+  },
+  "claimBoundary": "same-machine Spark treatment comparison; published Hadoop results are reference only"
+}

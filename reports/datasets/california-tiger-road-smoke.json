@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "dataset": "california-tiger-la-road-mbr",
+  "createdUtc": "2026-05-27T10:05:19.628977+00:00",
+  "csvPath": "datasets-curated/california-tiger-road-smoke.csv",
+  "csvSha256": "9a4d4eb38713b09095bc068b5d347dd95cf2af75d898e3e34edc3c84cf5adf73",
+  "objects": 40,
+  "rows": 310,
+  "queries": 1,
+  "instancesPerObject": {
+    "minimum": 5,
+    "maximum": 11
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 4,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 6,
+      "instances": 52,
+      "mbr": [
+        123764.123,
+        -436390.072,
+        173801.582,
+        -386814.178
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 8,
+      "instances": 63,
+      "mbr": [
+        127972.914,
+        -471824.002,
+        159789.416,
+        -416584.537
+      ]
+    },
+    {
+      "serverId": 2,
+      "objects": 14,
+      "instances": 107,
+      "mbr": [
+        127944.316,
+        -471405.283,
+        209053.946,
+        -372979.349
+      ]
+    },
+    {
+      "serverId": 3,
+      "objects": 12,
+      "instances": 88,
+      "mbr": [
+        125612.762,
+        -440434.915,
+        208067.606,
+        -426103.8
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 310,
+    "objectQueryGroups": 40,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "sourcePath": "datasets-osm/tl_2018_06037_roads/tl_2018_06037_roads.shp",
+  "sourceSha256": "febee4baa2e4e16321fe7ead26cf2b478c11db156bfa31b65c899b7b2d9da636",
+  "sourceCrs": "EPSG:4269",
+  "projectedCrs": "EPSG:3310",
+  "queryPolicy": "seeded uniformly sampled point within projected dataset extent",
+  "samplePolicy": "uniform points inside each road-segment MBR"
+}

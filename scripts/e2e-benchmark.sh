@@ -15,13 +15,16 @@ QUERIES="${QUERIES:-2}"
 K="${K:-10}"
 MISSING_RATE="${MISSING_RATE:-0.35}"
 RATE_PER_SECOND="${RATE_PER_SECOND:-200}"
-QOS="${QOS:-0}"
+QOS="${QOS:-1}"
 PARTITIONS="${PARTITIONS:-${PARALLELISM:-4}}"
 SYNOPSIS_BINS="${SYNOPSIS_BINS:-8}"
 ALGORITHM="${ALGORITHM:-aes-dscp}"
+VALIDATE_EXACT="${VALIDATE_EXACT:-true}"
+RUN_LOCAL_ORACLE="${RUN_LOCAL_ORACLE:-$VALIDATE_EXACT}"
 SEED="${SEED:-7}"
 DATASET="${DATASET:-synthetic}"
 DATASET_PATH="${DATASET_PATH:-}"
+DATASET_MANIFEST="${DATASET_MANIFEST:-}"
 MAX_EVENTS="${MAX_EVENTS:-0}"
 RUN_ID="${RUN_ID:-stream-$(date -u +%Y%m%dT%H%M%SZ)}"
 if ((MAX_EVENTS <= 0)); then
@@ -108,6 +111,17 @@ wait_for_messages() {
 
 cd "$ROOT_DIR"
 
+spark_dataset_path="$DATASET_PATH"
+spark_dataset_mount=()
+if [[ "$DATASET" == "csv" ]]; then
+  if [[ -z "$DATASET_PATH" || ! -f "$DATASET_PATH" ]]; then
+    echo "DATASET=csv requires a readable DATASET_PATH" >&2
+    exit 1
+  fi
+  spark_dataset_path="/opt/spark/input/events.csv"
+  spark_dataset_mount=(-v "$DATASET_PATH:$spark_dataset_path:ro,Z")
+fi
+
 echo "Starting and configuring clean MQTT/Kafka/Spark stack..."
 RESET=1 TOPIC_MAPPINGS="$TOPIC_MAPPINGS" "$ROOT_DIR/scripts/setup-services.sh"
 
@@ -144,7 +158,7 @@ echo "Running bounded Spark Kafka drain..."
 spark_start_ms="$(now_ms)"
 >"$SPARK_SUBMIT_LOG"
 
-docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
+docker compose -f "$COMPOSE_FILE" run --rm "${spark_dataset_mount[@]}" spark-submit \
   /opt/spark/bin/spark-submit \
   --master spark://spark-master:7077 \
   --deploy-mode client \
@@ -157,7 +171,7 @@ docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
   --checkpointLocation="/tmp/ptd-checkpoints/$RUN_ID" \
   --expectedMessages="$EXPECTED_MESSAGES" \
   --dataset="$DATASET" \
-  --datasetPath="$DATASET_PATH" \
+  --datasetPath="$spark_dataset_path" \
   --objects="$OBJECTS" \
   --dimensions="$DIMENSIONS" \
   --queries="$QUERIES" \
@@ -168,7 +182,7 @@ docker compose -f "$COMPOSE_FILE" run --rm spark-submit \
   --algorithm="$ALGORITHM" \
   --maxEvents="$MAX_EVENTS" \
   --seed="$SEED" \
-  --validateExact=true \
+  --validateExact="$VALIDATE_EXACT" \
   --sparkMaster=spark://spark-master:7077 >>"$SPARK_SUBMIT_LOG" 2>&1
 spark_end_ms="$(now_ms)"
 cp "$SPARK_SUBMIT_LOG" "$SPARK_LOG"
@@ -245,29 +259,39 @@ EOF_CSV
 cat "$SUMMARY"
 
 ALGORITHM_LOG="$REPORT_DIR/algorithm-validation.log"
-echo "Running untimed exactness validation for the saved stream snapshot configuration..."
-mvn -q -DskipTests compile exec:java \
-  -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
-  -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=$SEED --partitions=$PARTITIONS --synopsisBins=$SYNOPSIS_BINS --maxEvents=$MAX_EVENTS" \
-  >"$ALGORITHM_LOG" 2>&1
-if grep -q "topKAgreement=false" "$ALGORITHM_LOG"; then
-  cat "$ALGORITHM_LOG" >&2
-  exit 1
+algorithm_artifact=()
+if [[ "$RUN_LOCAL_ORACLE" == "1" || "$RUN_LOCAL_ORACLE" == "true" ]]; then
+  echo "Running untimed exactness validation for the saved stream snapshot configuration..."
+  mvn -q -DskipTests compile exec:java \
+    -Dexec.mainClass=com.thesis.topk.benchmark.TopKBenchmark \
+    -Dexec.args="--dataset=$DATASET --datasetPath=$DATASET_PATH --objects=$OBJECTS --dimensions=$DIMENSIONS --queries=$QUERIES --k=$K --missingRate=$MISSING_RATE --seed=$SEED --partitions=$PARTITIONS --synopsisBins=$SYNOPSIS_BINS --maxEvents=$MAX_EVENTS" \
+    >"$ALGORITHM_LOG" 2>&1
+  if grep -q "topKAgreement=false" "$ALGORITHM_LOG"; then
+    cat "$ALGORITHM_LOG" >&2
+    exit 1
+  fi
+  algorithm_artifact=(--algorithm-log "$ALGORITHM_LOG")
 fi
 
 dataset_artifact=()
+dataset_manifest_artifact=()
 if [[ -n "$DATASET_PATH" && -f "$DATASET_PATH" ]]; then
   dataset_artifact=(--dataset-file "$DATASET_PATH")
+fi
+if [[ -n "$DATASET_MANIFEST" && -f "$DATASET_MANIFEST" ]]; then
+  dataset_manifest_artifact=(--dataset-manifest "$DATASET_MANIFEST")
 fi
 python3 scripts/research/archive_run.py \
   --run-id "$RUN_ID" \
   --mode stream \
   --spark-log "$SPARK_LOG" \
-  --algorithm-log "$ALGORITHM_LOG" \
+  "${algorithm_artifact[@]}" \
   --e2e-summary "$CSV" \
   "${dataset_artifact[@]}" \
+  "${dataset_manifest_artifact[@]}" \
   --parameter "dataset=$DATASET" \
   --parameter "algorithm=$ALGORITHM" \
+  --parameter "validateExact=$VALIDATE_EXACT" \
   --parameter "objects=$OBJECTS" \
   --parameter "queries=$QUERIES" \
   --parameter "dimensions=$DIMENSIONS" \

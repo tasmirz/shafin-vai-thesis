@@ -334,6 +334,7 @@ async function showRun(runId) {
       <div><label>Algorithm elapsed</label><strong>${formatMs(spark.algorithmElapsedMs)}</strong></div>
       <div><label>Setup elapsed</label><strong>${formatMs(spark.setupMs)}</strong></div>
       <div><label>Variant</label><strong>${escapeHtml(spark.algorithm || "legacy")}</strong></div>
+      <div><label>Setup role</label><strong>${escapeHtml(run.summary.setupRole || "general run")}</strong></div>
       <div><label>Validation elapsed</label><strong>${formatMs(spark.validationMs)}</strong></div>
       <div><label>Raw events</label><strong>${spark.rawEvents ?? "n/a"}</strong></div>
       <div><label>Avg candidate filtered</label><strong>${pruningDisplay(spark.algorithm, spark.avgPruneRatio)}</strong></div>
@@ -434,6 +435,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("compare-selected").addEventListener("click", compareSelected);
   document.getElementById("csv-launch-form").addEventListener("submit", event => launch(event, "csv"));
   document.getElementById("stream-launch-form").addEventListener("submit", event => launch(event, "stream"));
+  document.getElementById("paper-suite-launch-form").addEventListener("submit", event => launch(event, "paper-suite"));
   document.getElementById("smartphone-generate-form").addEventListener("submit", event => launch(event, "smartphone"));
   document.getElementById("osm-generate-form").addEventListener("submit", event => launch(event, "osm"));
   document.getElementById("close-drawer").addEventListener("click", closeDrawer);
