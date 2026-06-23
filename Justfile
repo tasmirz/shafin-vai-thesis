@@ -70,6 +70,14 @@ config-check:
 hadoop-smoke:
     scripts/research/validate_hadoop_cluster.sh
 
+# run one executable Hadoop MapReduce PTD treatment inside the Docker Hadoop cluster
+hadoop-csv-test:
+    RUN_ID={{ run_id }} ALGORITHM={{ algorithm }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_hadoop_csv_benchmark.sh
+
+# run executable Hadoop MapReduce baseline/AES/DSCP/AES+DSCP treatments
+hadoop-ablation-test:
+    SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_hadoop_ablation_suite.sh
+
 # run the Spark upgraded job locally
 spark:
     mkdir -p reports/spark
@@ -105,6 +113,10 @@ csv-test:
 ablation-test:
     SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" scripts/research/run_ablation_suite.sh
 
+# run the full three-way comparison (Spark Baseline vs New Spark vs ICCIT Hadoop)
+three-way-compare:
+    scripts/research/run_three_way_comparison.sh
+
 # run the four ICCIT treatments against a curated profile and create a comparison report
 iccit-compare:
     PROFILE="${PROFILE:-smartphone}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \
@@ -116,6 +128,10 @@ paper-setup:
     PROFILE="${PROFILE:-smartphone}" SETUP="${SETUP:-paired}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \
       VALIDATE_EXACT="${VALIDATE_EXACT:-false}" BUILD_IMAGE="${BUILD_IMAGE:-1}" \
       scripts/research/run_paper_setup.sh
+
+# validate the Hadoop-reference AES+DSCP comparison report on a small fixture
+hadoop-aes-dscp-test:
+    SUITE_ID={{ run_id }} BUILD_IMAGE="${BUILD_IMAGE:-1}" tests/integration/test_hadoop_aes_dscp_comparison.sh
 
 # render ICCIT-shaped observed Spark figures from completed smartphone and road suites
 paper-figures smartphone_suite road_suite:

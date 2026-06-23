@@ -1,4 +1,15 @@
-const state = { dashboard: null, runs: [], csv: null, jobs: [], paperDatasets: [], osm: null, matrix: null, figures: [] };
+const state = {
+  dashboard: null,
+  runs: [],
+  csv: null,
+  jobs: [],
+  paperDatasets: [],
+  osm: null,
+  matrix: null,
+  figures: [],
+  allDatasetReport: null,
+  hadoopReference: null
+};
 
 const titles = {
   dashboard: "Research Dashboard",
@@ -84,10 +95,13 @@ function openView(name) {
 
 async function refreshAll() {
   try {
-    const [dashboard, runDocument, csv, jobs, datasets, osm, matrix, figures] = await Promise.all([
+    const [
+      dashboard, runDocument, csv, jobs, datasets, osm, matrix, figures,
+      allDatasetReport, hadoopReference
+    ] = await Promise.all([
       api("/api/dashboard"), api("/api/runs"), api("/api/datasets/csv"), api("/api/jobs"),
       api("/api/datasets/paper"), api("/api/datasets/osm-readiness"), api("/api/experiment-matrix"),
-      api("/api/reports/figures")
+      api("/api/reports/figures"), api("/api/reports/all-dataset"), api("/api/reports/hadoop-reference")
     ]);
     state.dashboard = dashboard;
     state.runs = runDocument.runs;
@@ -97,6 +111,8 @@ async function refreshAll() {
     state.osm = osm;
     state.matrix = matrix;
     state.figures = figures.figures;
+    state.allDatasetReport = allDatasetReport;
+    state.hadoopReference = hadoopReference;
     renderDashboard();
     renderRunArchive();
     renderResults();
@@ -105,6 +121,8 @@ async function refreshAll() {
     renderCsv(csv);
     renderPaperDatasets();
     renderTelemetry();
+    renderHadoopReferenceComparisons();
+    renderAllDatasetReport();
     renderMatrix();
     renderPaperFigures();
     renderJobs();
@@ -259,6 +277,85 @@ function renderTelemetry() {
   document.getElementById("telemetry-summary").innerHTML = measured.length
     ? `<div class="scroll-table"><table class="table"><thead><tr><th>Run</th><th>Shuffle bytes</th><th>Shuffle records</th><th>Filter ms</th><th>Refine ms</th><th>Skew ratio</th></tr></thead><tbody>${measured.slice(0, 10).map(run => `<tr><td>${escapeHtml(run.id)}</td><td>${Number(run.summary.shuffleBytes).toLocaleString()}</td><td>${Number(run.summary.shuffleRecords).toLocaleString()}</td><td>${run.summary.filterMs}</td><td>${run.summary.refineMs}</td><td>${Number(run.summary.stragglerRatio || 0).toFixed(2)}</td></tr>`).join("")}</tbody></table></div>`
     : '<div class="empty-state">Execute a freshly instrumented run to record Spark telemetry.</div>';
+}
+
+function renderAllDatasetReport() {
+  const target = document.getElementById("all-dataset-report");
+  const report = state.allDatasetReport;
+  if (!target || !report) return;
+  if (!report.generated) {
+    target.innerHTML = `<div class="empty-state">Generate the all-dataset publication report to populate this comparison.</div>
+      <p class="callout warning">${escapeHtml(report.claimBoundary)}</p>`;
+    return;
+  }
+  const treatmentRows = report.treatments.map(row => `<tr>
+    <td>${escapeHtml(row.dataset)}</td>
+    <td>${row.queries}</td>
+    <td>${formatMs(row.baseline_ms)}</td>
+    <td>${formatMs(row.aes_dscp_ms)}</td>
+    <td>${Number(row.aes_dscp_reduction_pct).toFixed(2)}%</td>
+    <td>${Number(row.emission_reduction_pct).toFixed(2)}%</td>
+    <td>${Number(row.shuffle_reduction_pct).toFixed(2)}%</td>
+  </tr>`).join("");
+  const streamRows = report.streams.map(row => `<tr>
+    <td>${escapeHtml(row.dataset)}</td>
+    <td>${Number(row.messages).toLocaleString()}</td>
+    <td>${row.queries}</td>
+    <td>${formatMs(row.algorithm_ms)}</td>
+    <td>${formatMs(row.pipeline_total_ms)}</td>
+    <td>${escapeHtml(row.validation == null ? "not run" : row.validation)}</td>
+  </tr>`).join("");
+  target.innerHTML = `<p class="callout info">${escapeHtml(report.claimBoundary)}. Source: ${escapeHtml(report.reportPath)}</p>
+    <div class="scroll-table"><table class="table"><thead><tr><th>Dataset</th><th>Queries</th><th>Baseline</th><th>AES+DSCP</th><th>Runtime reduction</th><th>Emission reduction</th><th>Shuffle reduction</th></tr></thead><tbody>
+      ${treatmentRows || '<tr><td colspan="7">No treatment rows recorded.</td></tr>'}
+    </tbody></table></div>
+    <div class="scroll-table"><table class="table"><thead><tr><th>Stream dataset</th><th>Messages</th><th>Queries</th><th>Algorithm time</th><th>E2E time</th><th>Exact validation</th></tr></thead><tbody>
+      ${streamRows || '<tr><td colspan="6">No stream rows recorded.</td></tr>'}
+    </tbody></table></div>`;
+}
+
+function renderHadoopReferenceComparisons() {
+  const target = document.getElementById("hadoop-reference-comparison");
+  const report = state.hadoopReference;
+  if (!target || !report) return;
+  if (!report.publishedHadoop.length && !report.sparkSuites.length) {
+    target.innerHTML = `<div class="empty-state">Run a four-treatment Spark ablation suite to populate this comparison.</div>
+      <p class="callout warning">${escapeHtml(report.claimBoundary)}</p>`;
+    return;
+  }
+  const hadoopTables = report.publishedHadoop.map(group => `<div class="detail-section">
+    <h4>ICCIT Hadoop reference: ${escapeHtml(group.dataset)}</h4>
+    <p class="subtle">act_CC: ${escapeHtml(group.actCc)}; published AES+DSCP reduction: ${Number(group.fullReductionPct).toFixed(1)}%</p>
+    ${treatmentTable(group.rows)}
+  </div>`).join("");
+  const sparkTables = report.sparkSuites.slice(0, 6).map(suite => `<div class="detail-section">
+    <h4>Spark observed suite: ${escapeHtml(suite.suiteId)}</h4>
+    <p class="subtle">dataset=${escapeHtml(suite.dataset)}; k=${escapeHtml(suite.k)}; partitions=${escapeHtml(suite.partitions)}</p>
+    ${treatmentTable(suite.rows)}
+  </div>`).join("");
+  target.innerHTML = `<p class="callout info">${escapeHtml(report.claimBoundary)} ${escapeHtml(report.aliasNote)}</p>
+    ${hadoopTables}
+    ${sparkTables || '<div class="empty-state">No complete Spark baseline/AES/DSCP/AES+DSCP suite is saved yet.</div>'}`;
+  bindRunLinks();
+}
+
+function treatmentTable(rows) {
+  return `<div class="scroll-table"><table class="table"><thead><tr>
+      <th>Source</th><th>Treatment</th><th>Clock time</th><th>Reduction vs baseline</th><th>Pruning rate</th><th>Emitted</th><th>Shuffle bytes</th><th>False prunes</th><th>Exact</th>
+    </tr></thead><tbody>
+      ${rows.map(row => `<tr>
+        <td>${escapeHtml(row.source)}</td>
+        <td>${row.runId ? `<button class="run-link" data-run="${escapeHtml(row.runId)}">${escapeHtml(row.label)}</button>` : escapeHtml(row.label)}</td>
+        <td>${formatMs(row.clockTimeMs)}</td>
+        <td>${row.reductionVsBaselinePct == null ? "n/a" : `${Number(row.reductionVsBaselinePct).toFixed(2)}%`}</td>
+        <td>${row.pruningRate == null ? "not reported" : percent(row.pruningRate)}</td>
+        <td>${row.emittedRecords == null ? "not reported" : Number(row.emittedRecords).toLocaleString()}</td>
+        <td>${row.shuffleBytes == null ? "not reported" : Number(row.shuffleBytes).toLocaleString()}</td>
+        <td>${row.falsePrunes == null ? "not reported" : Number(row.falsePrunes).toLocaleString()}</td>
+        <td>${escapeHtml(row.exactAgreement == null ? "not reported" : row.exactAgreement)}</td>
+      </tr>`).join("")}
+      </tbody></table></div>
+    `;
 }
 
 function renderMatrix() {
@@ -436,6 +533,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("csv-launch-form").addEventListener("submit", event => launch(event, "csv"));
   document.getElementById("stream-launch-form").addEventListener("submit", event => launch(event, "stream"));
   document.getElementById("paper-suite-launch-form").addEventListener("submit", event => launch(event, "paper-suite"));
+  document.getElementById("hadoop-aes-dscp-test-form").addEventListener("submit", event => launch(event, "hadoop-aes-dscp-test"));
   document.getElementById("smartphone-generate-form").addEventListener("submit", event => launch(event, "smartphone"));
   document.getElementById("osm-generate-form").addEventListener("submit", event => launch(event, "osm"));
   document.getElementById("close-drawer").addEventListener("click", closeDrawer);

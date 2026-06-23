@@ -54,8 +54,9 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
   metric_log = re.sub(
       r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} WARN [^\n]*(?:\n|$)", "", spark_log)
   # The engine line begins with a key rather than a marker.
-  engine_match = re.search(r"^engine=apache-spark (.+)$", metric_log, re.MULTILINE)
-  engine = dict(re.findall(r"(\w+)=([^\s]+)", engine_match.group(1))) if engine_match else {}
+  engine_match = re.search(r"^engine=(apache-(?:spark|hadoop)) (.+)$", metric_log, re.MULTILINE)
+  engine = dict(re.findall(r"(\w+)=([^\s]+)", engine_match.group(2))) if engine_match else {}
+  execution_engine = engine_match.group(1) if engine_match else "unknown"
   count_match = re.search(r"^rawEvents=(\d+) probabilisticInstances=(\d+)", metric_log, re.MULTILINE)
   rankings = []
   trace_rows = []
@@ -133,6 +134,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
     e2e = rows[-1] if rows else {}
   return {
       "spark": {
+          "engine": execution_engine,
           "source": engine.get("source"),
           "dataset": engine.get("dataset"),
           "k": int(engine["k"]) if "k" in engine else None,
@@ -182,7 +184,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--run-id", required=True)
-  parser.add_argument("--mode", required=True, choices=("csv", "stream", "simulator"))
+  parser.add_argument("--mode", required=True, choices=("csv", "stream", "simulator", "hadoop"))
   parser.add_argument("--spark-log", required=True)
   parser.add_argument("--algorithm-log")
   parser.add_argument("--e2e-summary")

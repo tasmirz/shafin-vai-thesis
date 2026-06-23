@@ -33,14 +33,19 @@ curl -fsS "$BASE_URL/api/datasets/csv" >"$TMP_DIR/csv.json"
 curl -fsS "$BASE_URL/api/datasets/csv?path=tests/fixtures/paper/smartphone-paper-small.csv" >"$TMP_DIR/paper.csv.json"
 curl -fsS "$BASE_URL/api/datasets/osm-readiness" >"$TMP_DIR/osm.json"
 curl -fsS "$BASE_URL/api/experiment-matrix" >"$TMP_DIR/matrix.json"
+curl -fsS "$BASE_URL/api/reports/all-dataset" >"$TMP_DIR/all-dataset.json"
+curl -fsS "$BASE_URL/api/reports/hadoop-reference" >"$TMP_DIR/hadoop-reference.json"
 curl -fsS "$BASE_URL/api/reports/latex" >"$TMP_DIR/results.tex"
 
 grep -q "PTD-BenchLab" "$TMP_DIR/index.html"
 grep -q "Runs &amp; Compare" "$TMP_DIR/index.html"
 grep -q "Rai-Lian baseline and ICCIT Spark upgrade" "$TMP_DIR/index.html"
+grep -q "AES+DSCP comparison guard" "$TMP_DIR/index.html"
+grep -q "Baseline vs ICCIT Hadoop and Spark treatments" "$TMP_DIR/index.html"
+grep -q "All-dataset comparison report" "$TMP_DIR/index.html"
 grep -q "\\.drawer" "$TMP_DIR/styles.css"
 grep -q "renderDashboard" "$TMP_DIR/app.js"
-python3 - "$TMP_DIR/dashboard.json" "$TMP_DIR/csv.json" "$TMP_DIR/paper.csv.json" "$TMP_DIR/osm.json" "$TMP_DIR/matrix.json" <<'PY'
+python3 - "$TMP_DIR/dashboard.json" "$TMP_DIR/csv.json" "$TMP_DIR/paper.csv.json" "$TMP_DIR/osm.json" "$TMP_DIR/matrix.json" "$TMP_DIR/all-dataset.json" "$TMP_DIR/hadoop-reference.json" <<'PY'
 import json
 import sys
 
@@ -54,6 +59,10 @@ with open(sys.argv[4]) as source:
   osm = json.load(source)
 with open(sys.argv[5]) as source:
   matrix = json.load(source)
+with open(sys.argv[6]) as source:
+  all_dataset = json.load(source)
+with open(sys.argv[7]) as source:
+  hadoop_reference = json.load(source)
 assert dashboard["project"]["name"] == "PTD-BenchLab"
 assert "savedRuns" in dashboard["counts"]
 assert dataset["records"] == 12
@@ -61,6 +70,11 @@ assert dataset["missingAttributeValues"] > 0
 assert paper["probabilityAudit"]["passed"] is True
 assert osm["ready"] is True
 assert matrix["runCount"] > 0
+assert "Hadoop" in all_dataset["claimBoundary"]
+assert "treatments" in all_dataset and "streams" in all_dataset
+assert "aes+dhcp" in hadoop_reference["aliasNote"]
+assert len(hadoop_reference["publishedHadoop"]) >= 2
+assert "sparkSuites" in hadoop_reference
 PY
 grep -q '\\begin{tabular}' "$TMP_DIR/results.tex"
 

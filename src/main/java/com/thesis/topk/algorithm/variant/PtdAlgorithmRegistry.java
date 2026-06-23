@@ -74,8 +74,9 @@ public final class PtdAlgorithmRegistry {
   private static String normalize(String identifier) {
     String id = identifier == null ? DEFAULT_ID : identifier.strip().toLowerCase(Locale.ROOT);
     return switch (id) {
-      case "full", "aes+dscp", "aes_dscp", "aesdscp" -> DEFAULT_ID;
-      case "dscp", "dscp_only" -> "dscp-only";
+      case "full", "aes+dscp", "aes_dscp", "aesdscp",
+          "aes+dhcp", "aes_dhcp", "aesdhcp" -> DEFAULT_ID;
+      case "dscp", "dscp_only", "dhcp", "dhcp-only", "dhcp_only" -> "dscp-only";
       case "aes", "aes_only" -> "aes-only";
       default -> id;
     };

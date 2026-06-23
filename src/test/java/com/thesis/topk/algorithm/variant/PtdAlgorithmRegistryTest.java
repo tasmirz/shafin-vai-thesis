@@ -17,6 +17,8 @@ class PtdAlgorithmRegistryTest {
     assertThat(PtdAlgorithmRegistry.require("aes-only").dscpEnabled()).isFalse();
     assertThat(PtdAlgorithmRegistry.require("aes-only").aesEnabled()).isTrue();
     assertThat(PtdAlgorithmRegistry.require("AES+DSCP").id()).isEqualTo("aes-dscp");
+    assertThat(PtdAlgorithmRegistry.require("AES+DHCP").id()).isEqualTo("aes-dscp");
+    assertThat(PtdAlgorithmRegistry.require("dhcp-only").id()).isEqualTo("dscp-only");
   }
 
   @Test

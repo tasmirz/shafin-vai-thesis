@@ -24,4 +24,16 @@
     <name>mapreduce.reduce.env</name>
     <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
   </property>
+  <property>
+    <name>mapreduce.map.java.opts</name>
+    <value>--add-opens java.base/java.lang=ALL-UNNAMED</value>
+  </property>
+  <property>
+    <name>mapreduce.reduce.java.opts</name>
+    <value>--add-opens java.base/java.lang=ALL-UNNAMED</value>
+  </property>
+  <property>
+    <name>yarn.app.mapreduce.am.command-opts</name>
+    <value>--add-opens java.base/java.lang=ALL-UNNAMED</value>
+  </property>
 </configuration>

@@ -1,4 +1,4 @@
-FROM eclipse-temurin:8-jdk-jammy
+FROM eclipse-temurin:17-jdk-jammy
 
 ARG HADOOP_VERSION=3.3.6
 ENV HADOOP_HOME=/opt/hadoop
@@ -28,6 +28,8 @@ COPY docker/hadoop/entrypoint.sh /usr/local/bin/hadoop-role
 
 RUN chmod +x /usr/local/bin/hadoop-role \
     && printf '\nexport JAVA_HOME=%s\n' "${JAVA_HOME}" >> "${HADOOP_CONF_DIR}/hadoop-env.sh" \
-    && printf '\nexport JAVA_HOME=%s\n' "${JAVA_HOME}" >> "${HADOOP_CONF_DIR}/yarn-env.sh"
+    && printf '\nexport JAVA_HOME=%s\n' "${JAVA_HOME}" >> "${HADOOP_CONF_DIR}/yarn-env.sh" \
+    && printf '\nexport HADOOP_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED"\n' >> "${HADOOP_CONF_DIR}/hadoop-env.sh" \
+    && printf '\nexport YARN_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED"\n' >> "${HADOOP_CONF_DIR}/yarn-env.sh"
 
 ENTRYPOINT ["/usr/local/bin/hadoop-role"]

@@ -35,23 +35,52 @@ CSV_FIXTURE = ROOT / "tests" / "fixtures" / "csv" / "smartphone-small.csv"
 DATASET_ROOT = ROOT / "datasets-curated"
 DATASET_MANIFEST_ROOT = ROOT / "reports" / "datasets"
 FIGURE_ROOT = ROOT / "reports" / "figures"
+PUBLICATION_ROOT = ROOT / "reports" / "publication"
+VALIDATION_ROOT = ROOT / "reports" / "validation"
 OSM_PROTOCOL = ROOT / "config" / "research" / "bangladesh-osm-replication.json"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ALGORITHMS = ("baseline", "dscp-only", "aes-only", "aes-dscp")
+COMPARISON_ALGORITHMS = ("baseline", "aes-only", "dscp-only", "aes-dscp")
+ALGORITHM_LABELS = {
+    "baseline": "Baseline",
+    "aes-only": "AES-only",
+    "dscp-only": "DSCP-only",
+    "aes-dscp": "AES+DSCP",
+}
+PUBLISHED_ICCIT_HADOOP = {
+    "smartphone": {
+        "dataset": "Synthetic smartphone",
+        "baseline": 66520,
+        "aes-only": 44760,
+        "dscp-only": 58484,
+        "aes-dscp": 43757,
+        "fullReductionPct": 34.2,
+        "actCc": "1.4179 x 10^11",
+    },
+    "road": {
+        "dataset": "Bangladesh OSM road",
+        "baseline": 56274,
+        "aes-only": 42967,
+        "dscp-only": 46848,
+        "aes-dscp": 42366,
+        "fullReductionPct": 24.7,
+        "actCc": "1.543 x 10^10",
+    },
+}
 
 PAPER_TARGETS = [
     {
-        "dataset": "Synthetic smartphone",
-        "baselineMs": 66520,
-        "proposedMs": 43757,
-        "reductionPct": 34.2,
+        "dataset": PUBLISHED_ICCIT_HADOOP["smartphone"]["dataset"],
+        "baselineMs": PUBLISHED_ICCIT_HADOOP["smartphone"]["baseline"],
+        "proposedMs": PUBLISHED_ICCIT_HADOOP["smartphone"]["aes-dscp"],
+        "reductionPct": PUBLISHED_ICCIT_HADOOP["smartphone"]["fullReductionPct"],
         "status": "Published Hadoop reference; observed Spark suite available in generated figures (12.61% within-Spark reduction)",
     },
     {
-        "dataset": "Bangladesh road / OSM",
-        "baselineMs": 56274,
-        "proposedMs": 42366,
-        "reductionPct": 24.7,
+        "dataset": PUBLISHED_ICCIT_HADOOP["road"]["dataset"],
+        "baselineMs": PUBLISHED_ICCIT_HADOOP["road"]["baseline"],
+        "proposedMs": PUBLISHED_ICCIT_HADOOP["road"]["aes-dscp"],
+        "reductionPct": PUBLISHED_ICCIT_HADOOP["road"]["fullReductionPct"],
         "status": "Published Hadoop reference; fixed 20-query Bangladesh Spark suite records 58.61% within-Spark reduction",
     },
 ]
@@ -378,6 +407,146 @@ def paper_figures() -> list[dict]:
   ]
 
 
+def all_dataset_report() -> dict:
+  path = PUBLICATION_ROOT / "all-dataset-benchmark-report.json"
+  markdown = PUBLICATION_ROOT / "all-dataset-benchmark-report.md"
+  try:
+    report_path = str(markdown.relative_to(ROOT))
+  except ValueError:
+    report_path = str(markdown)
+  if not path.is_file():
+    return {
+        "generated": False,
+        "reportPath": report_path,
+        "treatments": [],
+        "streams": [],
+        "claimBoundary": "same-machine Spark comparisons only; Hadoop papers are reference",
+    }
+  document = json_file(path)
+  return {
+      "generated": True,
+      "reportPath": report_path,
+      "generatedUtc": document.get("generatedUtc"),
+      "treatments": document.get("treatments", []),
+      "streams": document.get("streams", []),
+      "claimBoundary": document.get(
+          "claimBoundary",
+          "same-machine Spark comparisons only; Hadoop papers are reference"),
+  }
+
+
+def hadoop_reference_comparisons() -> dict:
+  return treatment_comparison_matrix()
+
+
+def treatment_comparison_matrix() -> dict:
+  return {
+      "publishedHadoop": published_hadoop_rows(),
+      "sparkSuites": spark_treatment_suites(),
+      "claimBoundary": (
+          "ICCIT Hadoop rows are published references from a different runtime and hardware. "
+          "Spark rows are current-repo observations. Use clock time across groups as descriptive "
+          "context only; algorithmic speedup claims require same-machine Hadoop PTD jobs."),
+      "aliasNote": "The web and CLI accept aes+dhcp as an alias for the implemented aes-dscp treatment.",
+      "metrics": [
+          "clock time / algorithmElapsedMs",
+          "candidate pruning rate / avgPruneRatio",
+          "emitted records",
+          "shuffle bytes",
+          "false-prune count",
+          "exact-agreement validation state",
+      ],
+  }
+
+
+def published_hadoop_rows() -> list[dict]:
+  rows = []
+  for profile, reference in PUBLISHED_ICCIT_HADOOP.items():
+    baseline = reference["baseline"]
+    rows.append({
+        "profile": profile,
+        "dataset": reference["dataset"],
+        "actCc": reference["actCc"],
+        "fullReductionPct": reference["fullReductionPct"],
+        "rows": [
+            {
+                "source": "iccit-hadoop-reference",
+                "algorithm": algorithm,
+                "label": ALGORITHM_LABELS[algorithm],
+                "clockTimeMs": reference[algorithm],
+                "reductionVsBaselinePct": (
+                    round((baseline - reference[algorithm]) / baseline * 100.0, 2)
+                    if algorithm != "baseline" else 0.0),
+                "pruningRate": None,
+                "emittedRecords": None,
+                "shuffleBytes": None,
+                "falsePrunes": None,
+                "exactAgreement": None,
+            }
+            for algorithm in COMPARISON_ALGORITHMS
+        ],
+    })
+  return rows
+
+
+def spark_treatment_suites() -> list[dict]:
+  if not RUN_ROOT.exists():
+    return []
+  prefixes: dict[str, set[str]] = {}
+  for path in RUN_ROOT.iterdir():
+    if not path.is_dir():
+      continue
+    for algorithm in ALGORITHMS:
+      suffix = f"-{algorithm}"
+      if path.name.endswith(suffix) and (path / "metrics.json").exists():
+        prefixes.setdefault(path.name[:-len(suffix)], set()).add(algorithm)
+  suites = []
+  for suite_id, algorithms in prefixes.items():
+    if set(ALGORITHMS) - algorithms:
+      continue
+    try:
+      runs = {algorithm: load_run(f"{suite_id}-{algorithm}") for algorithm in ALGORITHMS}
+    except (OSError, KeyError, json.JSONDecodeError, ValueError):
+      continue
+    baseline_time = runs["baseline"]["summary"].get("algorithmElapsedMs")
+    first = runs["baseline"]
+    suites.append({
+        "suiteId": suite_id,
+        "dataset": first["summary"].get("dataset"),
+        "mode": first.get("mode"),
+        "k": first["summary"].get("k"),
+        "partitions": first["summary"].get("partitions"),
+        "createdUtc": first.get("createdUtc"),
+        "rows": [
+            spark_treatment_row(runs[algorithm], baseline_time)
+            for algorithm in COMPARISON_ALGORITHMS
+        ],
+    })
+  return sorted(suites, key=lambda item: item.get("createdUtc") or "", reverse=True)
+
+
+def spark_treatment_row(run: dict, baseline_time: int | None) -> dict:
+  summary = run["summary"]
+  algorithm = summary.get("algorithm")
+  elapsed = summary.get("algorithmElapsedMs")
+  reduction = None
+  if baseline_time and elapsed is not None:
+    reduction = round((baseline_time - elapsed) / baseline_time * 100.0, 2)
+  return {
+      "source": "spark-observed",
+      "runId": run["id"],
+      "algorithm": algorithm,
+      "label": ALGORITHM_LABELS.get(algorithm, algorithm or "unknown"),
+      "clockTimeMs": elapsed,
+      "reductionVsBaselinePct": reduction,
+      "pruningRate": summary.get("avgPruneRatio"),
+      "emittedRecords": summary.get("totalEmittedRecords"),
+      "shuffleBytes": summary.get("shuffleBytes"),
+      "falsePrunes": summary.get("falsePruneCount"),
+      "exactAgreement": summary.get("exactAgreement"),
+  }
+
+
 def dashboard() -> dict:
   runs = list_runs()
   exact_runs = [item for item in runs if item["summary"]["exactAgreement"] is True]
@@ -420,6 +589,8 @@ def dashboard() -> dict:
               "Artifact bundle export",
               "Selectable baseline, DSCP-only, AES-only and AES + DSCP treatments",
               "Curated Rai-Lian baseline versus ICCIT Spark-upgrade setup launcher",
+              "Hadoop-reference AES+DSCP comparison guard launcher",
+              "All-dataset publication comparison report viewer",
               "Executed emission counts, AER and DSCP false-prune audit",
               "Paper-shaped smartphone and Bangladesh road MBR dataset builders",
               "Probability normalization and MBR containment audit",
@@ -478,14 +649,15 @@ JOB_LOCK = threading.Lock()
 
 def launch_job(payload: dict) -> dict:
   mode = payload.get("mode")
-  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite"}:
-    raise ValueError("Mode must be csv, stream, smartphone, osm or paper-suite.")
+  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite", "hadoop-aes-dscp-test"}:
+    raise ValueError(
+        "Mode must be csv, stream, smartphone, osm, paper-suite or hadoop-aes-dscp-test.")
   run_id = require_run_id(str(payload.get("runId", "")))
   if mode in {"csv", "stream"} and (RUN_ROOT / run_id).exists():
     raise ValueError("A saved run already exists with this ID.")
   if mode in {"smartphone", "osm"} and (DATASET_MANIFEST_ROOT / f"{run_id}.json").exists():
     raise ValueError("A generated dataset already exists with this ID.")
-  if mode == "paper-suite" and any(RUN_ROOT.glob(f"{run_id}-*")):
+  if mode in {"paper-suite", "hadoop-aes-dscp-test"} and any(RUN_ROOT.glob(f"{run_id}-*")):
     raise ValueError("A saved paper-setup run already exists with this setup ID.")
   with JOB_LOCK:
     if any(job.run_id == run_id and job.status == "running" for job in JOBS.values()):
@@ -523,6 +695,19 @@ def launch_job(payload: dict) -> dict:
         "E2E_REPORT_DIR": str(JOB_ROOT / job_id / "e2e"),
     })
     command = [str(ROOT / "tests" / "e2e" / "test_mqtt_kafka_spark.sh")]
+  elif mode == "hadoop-aes-dscp-test":
+    csv_path = project_file(payload.get("csvPath"), CSV_FIXTURE)
+    if csv_path.suffix.lower() != ".csv" or not csv_path.is_file():
+      raise ValueError("Select an existing CSV file within this project.")
+    env.update({
+        "SUITE_ID": run_id,
+        "CSV_PATH": str(csv_path),
+        "K": positive_int(payload.get("k", 2), "k"),
+        "PARTITIONS": positive_int(payload.get("partitions", 2), "partitions"),
+        "VALIDATE_EXACT": "true",
+        "TRACE_LIMIT": positive_int(payload.get("traceLimit", 10), "traceLimit"),
+    })
+    command = [str(ROOT / "tests" / "integration" / "test_hadoop_aes_dscp_comparison.sh")]
   elif mode in {"smartphone", "osm"}:
     output = DATASET_ROOT / f"{run_id}.csv"
     manifest = DATASET_MANIFEST_ROOT / f"{run_id}.json"
@@ -607,7 +792,16 @@ def integer(value, name: str) -> str:
 
 
 def algorithm_id(value) -> str:
-  identifier = str(value).lower()
+  identifier = str(value).strip().lower()
+  aliases = {
+      "aes+dhcp": "aes-dscp",
+      "aes_dhcp": "aes-dscp",
+      "aesdhcp": "aes-dscp",
+      "dhcp": "dscp-only",
+      "dhcp-only": "dscp-only",
+      "dhcp_only": "dscp-only",
+  }
+  identifier = aliases.get(identifier, identifier)
   if identifier not in ALGORITHMS:
     raise ValueError(f"algorithm must be one of: {', '.join(ALGORITHMS)}.")
   return identifier
@@ -676,6 +870,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
       elif request.path == "/api/reports/figures":
         self.send_json({"figures": paper_figures()})
+      elif request.path == "/api/reports/all-dataset":
+        self.send_json(all_dataset_report())
+      elif request.path == "/api/reports/hadoop-reference":
+        self.send_json(hadoop_reference_comparisons())
+      elif request.path == "/api/reports/treatment-comparison":
+        self.send_json(treatment_comparison_matrix())
       elif request.path.startswith("/api/reports/figures/"):
         name = Path(unquote(request.path.split("/")[-1])).name
         path = FIGURE_ROOT / name

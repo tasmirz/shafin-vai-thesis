@@ -198,6 +198,22 @@
           <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
           <button class="button primary" type="submit">Launch paper setup</button>
         </form>
+        <form class="panel form-card" id="hadoop-aes-dscp-test-form">
+          <div class="badge">Hadoop Reference Check</div>
+          <h3>AES+DSCP comparison guard</h3>
+          <p class="subtle">Run the paired baseline and AES+DSCP fixture test, then verify the Hadoop values remain reference-only in the generated report.</p>
+          <label>Suite ID<input name="runId" required value="hadoop-aes-dscp-web"></label>
+          <label>CSV path<input name="csvPath" value="tests/fixtures/csv/smartphone-small.csv"></label>
+          <div class="field-pair">
+            <label>k<input type="number" min="1" name="k" value="2"></label>
+            <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
+          </div>
+          <div class="field-pair">
+            <label>Trace rows<input type="number" min="1" name="traceLimit" value="10"></label>
+            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
+          </div>
+          <button class="button primary" type="submit">Launch reference check</button>
+        </form>
         <div class="two-column">
           <form class="panel form-card" id="smartphone-generate-form">
             <div class="badge">Paper Dataset</div>
@@ -356,6 +372,14 @@
           <h3>Communication metrics boundary</h3>
           <p class="callout info">Finite Spark runs now capture actual task-level shuffle bytes and records, phase timing, GC time and a straggler ratio. Report paper results only from comparable validated runs.</p>
           <div id="telemetry-summary"></div>
+        </section>
+        <section class="panel">
+          <h3>Baseline vs ICCIT Hadoop and Spark treatments</h3>
+          <div id="hadoop-reference-comparison"></div>
+        </section>
+        <section class="panel">
+          <h3>All-dataset comparison report</h3>
+          <div id="all-dataset-report"></div>
         </section>
         <section class="panel">
           <h3>Paper-style comparable figures</h3>

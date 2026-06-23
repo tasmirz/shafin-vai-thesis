@@ -8,7 +8,8 @@ from unittest.mock import patch
 from web import server
 
 
-def write_run(root, run_id, partitions=2, elapsed=100, exact=True, setup_role=None):
+def write_run(root, run_id, partitions=2, elapsed=100, exact=True, setup_role=None,
+              algorithm="aes-dscp"):
   path = root / run_id
   path.mkdir()
   manifest = {
@@ -25,7 +26,7 @@ def write_run(root, run_id, partitions=2, elapsed=100, exact=True, setup_role=No
       "spark": {
           "source": "simulator",
           "dataset": "csv",
-          "algorithm": "aes-dscp",
+          "algorithm": algorithm,
           "boundMode": "ddr-mbr-full-possible",
           "k": 2,
           "partitions": partitions,
@@ -205,6 +206,41 @@ class ResearchApiTest(unittest.TestCase):
       self.assertEqual("road-smoke", captured["env"]["PROFILE"])
       self.assertEqual("4g", captured["env"]["SPARK_DRIVER_MEMORY"])
 
+  def test_hadoop_reference_test_launches_integration_script(self):
+    captured = {}
+
+    class CompletedProcess:
+      def wait(self):
+        return 0
+
+    def fake_popen(command, **kwargs):
+      captured["command"] = command
+      captured["env"] = kwargs["env"]
+      return CompletedProcess()
+
+    with tempfile.TemporaryDirectory() as folder:
+      run_root = Path(folder) / "runs"
+      job_root = Path(folder) / "jobs"
+      run_root.mkdir()
+      with (
+          patch.object(server, "RUN_ROOT", run_root),
+          patch.object(server, "JOB_ROOT", job_root),
+          patch.object(server.subprocess, "Popen", side_effect=fake_popen),
+      ):
+        server.launch_job({
+            "mode": "hadoop-aes-dscp-test",
+            "runId": "hadoop-reference-web",
+            "csvPath": "tests/fixtures/csv/smartphone-small.csv",
+            "k": 2,
+            "partitions": 2,
+            "traceLimit": 10,
+        })
+        time.sleep(0.01)
+      self.assertTrue(captured["command"][0].endswith(
+          "tests/integration/test_hadoop_aes_dscp_comparison.sh"))
+      self.assertEqual("hadoop-reference-web", captured["env"]["SUITE_ID"])
+      self.assertEqual("true", captured["env"]["VALIDATE_EXACT"])
+
   def test_full_paper_osm_setup_requires_explicit_confirmation(self):
     with tempfile.TemporaryDirectory() as folder:
       with patch.object(server, "RUN_ROOT", Path(folder)):
@@ -222,6 +258,10 @@ class ResearchApiTest(unittest.TestCase):
       with patch.object(server, "RUN_ROOT", Path(folder)):
         with self.assertRaisesRegex(ValueError, "algorithm must be one of"):
           server.launch_job({"mode": "csv", "runId": "bad-algorithm", "algorithm": "unknown"})
+
+  def test_algorithm_alias_accepts_dhcp_typo(self):
+    self.assertEqual("aes-dscp", server.algorithm_id("aes+dhcp"))
+    self.assertEqual("dscp-only", server.algorithm_id("dhcp-only"))
 
   def test_default_experiment_matrix_includes_four_treatments(self):
     matrix = server.experiment_matrix()
@@ -245,6 +285,41 @@ class ResearchApiTest(unittest.TestCase):
       with patch.object(server, "FIGURE_ROOT", root):
         figures = server.paper_figures()
       self.assertEqual([{"name": "observed.svg", "url": "/api/reports/figures/observed.svg"}], figures)
+
+  def test_all_dataset_report_exposes_publication_matrix(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      (root / "all-dataset-benchmark-report.md").write_text("# Report\n")
+      (root / "all-dataset-benchmark-report.json").write_text(json.dumps({
+          "generatedUtc": "2026-05-26T00:00:00+00:00",
+          "claimBoundary": "same-machine Spark comparisons only; Hadoop papers are reference",
+          "treatments": [{"dataset": "Fixture", "aes_dscp_reduction_pct": 12.5}],
+          "streams": [{"dataset": "Fixture stream", "algorithm_ms": 10}],
+      }))
+      with patch.object(server, "PUBLICATION_ROOT", root):
+        report = server.all_dataset_report()
+      self.assertTrue(report["generated"])
+      self.assertEqual("Fixture", report["treatments"][0]["dataset"])
+      self.assertIn("Hadoop papers are reference", report["claimBoundary"])
+
+  def test_treatment_comparison_exposes_hadoop_reference_and_spark_suite(self):
+    with tempfile.TemporaryDirectory() as folder:
+      root = Path(folder)
+      write_run(root, "suite-baseline", elapsed=1000, algorithm="baseline")
+      write_run(root, "suite-aes-only", elapsed=800, algorithm="aes-only")
+      write_run(root, "suite-dscp-only", elapsed=900, algorithm="dscp-only")
+      write_run(root, "suite-aes-dscp", elapsed=700, algorithm="aes-dscp")
+      with patch.object(server, "RUN_ROOT", root):
+        report = server.treatment_comparison_matrix()
+      self.assertEqual(2, len(report["publishedHadoop"]))
+      self.assertEqual(
+          ["baseline", "aes-only", "dscp-only", "aes-dscp"],
+          [row["algorithm"] for row in report["publishedHadoop"][0]["rows"]])
+      self.assertEqual(1, len(report["sparkSuites"]))
+      self.assertEqual(
+          ["baseline", "aes-only", "dscp-only", "aes-dscp"],
+          [row["algorithm"] for row in report["sparkSuites"][0]["rows"]])
+      self.assertEqual(30.0, report["sparkSuites"][0]["rows"][3]["reductionVsBaselinePct"])
 
 
 if __name__ == "__main__":

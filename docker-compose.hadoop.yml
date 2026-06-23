@@ -58,7 +58,7 @@ services:
     command: ["client", "bash", "-lc", "hdfs dfs -ls /"]
     profiles: ["job"]
     volumes:
-      - ./:/workspace:ro
+      - ./:/workspace:ro,z
 
 volumes:
   hadoop-name:
