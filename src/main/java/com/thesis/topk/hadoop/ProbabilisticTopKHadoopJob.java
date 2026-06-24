@@ -290,7 +290,12 @@ public final class ProbabilisticTopKHadoopJob {
       double lower = DominanceScorer.expectedDominanceScore(
           objectInstances, allInstances, queryPoint);
       double objectMass = objectInstances.stream().mapToDouble(ProbabilisticInstance::probability).sum();
-      double remoteMass = 0; // map-side partial bounds only see local mass, so remoteMass is 0
+      // Map-side conservative upper bound: assume all other objects in this partition
+      // could fully dominate this object from remote partitions (remoteMass = sum of other objects' mass)
+      double remoteMass = allInstances.stream()
+          .filter(inst -> !inst.objectId().equals(objectId))
+          .mapToDouble(ProbabilisticInstance::probability)
+          .sum();
       double upper = lower + objectMass * remoteMass;
       
       List<String> competitors = allInstances.stream()
@@ -426,9 +431,7 @@ public final class ProbabilisticTopKHadoopJob {
       long baselineEmissions = records.stream().mapToLong(r -> r.mapperBaselineEmissions).sum();
       long aesEmissions = records.stream().mapToLong(r -> r.mapperAesEmissions).sum();
       long emittedRecords = algorithm.aesEnabled() ? aesEmissions : baselineEmissions;
-      long shuffleBytes = records.stream()
-          .filter(r -> r.mapperBaselineEmissions > 0 || r.mapperAesEmissions > 0)
-          .count() * 96L;
+      long shuffleBytes = emittedRecords * 96L;
       long emissionMs = Duration.between(emissionStart, Instant.now()).toMillis();
 
       Instant refineStart = Instant.now();
