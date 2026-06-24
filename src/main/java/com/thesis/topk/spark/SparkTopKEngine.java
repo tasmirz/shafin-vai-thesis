@@ -439,6 +439,7 @@ public final class SparkTopKEngine {
     if (localIndex == null) {
       throw new IllegalArgumentException("No local aR-tree for partition " + partitionId);
     }
+    List<ProbabilisticInstance> allLocalInstances = localIndex.getAllLocalInstances();
     List<CandidateEnvelope> envelopes = new ArrayList<>(localIndex.objectCount());
     List<Double> lowerBounds = new ArrayList<>();
     double[] threshold = {Double.NEGATIVE_INFINITY};
@@ -455,13 +456,30 @@ public final class SparkTopKEngine {
         double instanceLower = 0.0;
         double instanceUpper = 0.0;
         for (Map.Entry<Integer, Integer> selection : exportedLevels.entrySet()) {
-          Inspection inspection = indexes.get(selection.getKey())
-              .inspectAtLevel(candidate, queryPoint, selection.getValue());
-          instanceLower += inspection.fullyDominatedMass();
-          instanceUpper += inspection.fullyDominatedMass() + inspection.partialUpperMass();
-          if (!inspection.partiallyDominatedNodes().isEmpty()) {
-            baselineEmissions += inspection.partiallyDominatedNodes().size();
-            aesEmissions++;
+          int targetPartition = selection.getKey();
+          int level = selection.getValue();
+          if (targetPartition == partitionId) {
+            // Local partition: use exact instance-level scoring
+            instanceLower += DominanceScorer.expectedDominanceScore(
+                object.instances(), allLocalInstances, queryPoint);
+            instanceUpper += instanceLower; // Exact for local
+          } else {
+              // Remote partition: use conservative upper bound (LB + objectMass * remoteMass)
+            // instead of loose aR-tree partial upper mass - enables effective DSCP pruning
+            AggregateRTree remoteIndex = indexes.get(targetPartition);
+            if (remoteIndex != null) {
+              Inspection inspection = remoteIndex.inspectAtLevel(candidate, queryPoint, level);
+              double fullyDominated = inspection.fullyDominatedMass();
+              instanceLower += fullyDominated;
+              // Conservative UB: LB + candidateMass * remoteMass (paper's Eq. 4)
+              double candidateMass = candidate.probability();
+              double remoteMass = remoteIndex.totalProbabilityMass();
+              instanceUpper += fullyDominated + candidateMass * remoteMass;
+              if (!inspection.partiallyDominatedNodes().isEmpty()) {
+                baselineEmissions += inspection.partiallyDominatedNodes().size();
+                aesEmissions++;
+              }
+            }
           }
         }
         lowerBound += candidate.probability() * instanceLower;
@@ -488,7 +506,6 @@ public final class SparkTopKEngine {
     Map<Integer, Integer> levels = new HashMap<>();
     for (Map.Entry<Integer, AggregateRTree> entry : indexes.entrySet()) {
       if (entry.getKey() == localPartitionId) {
-        // Mapper-local tree traversal is not an exported communication cost: retain tight LB.
         levels.put(entry.getKey(), 0);
       } else {
         LevelSelection selected = entry.getValue().selectExportLevel(localInstances, queryPoint);

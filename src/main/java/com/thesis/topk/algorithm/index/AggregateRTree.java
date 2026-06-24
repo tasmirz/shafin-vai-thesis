@@ -105,6 +105,30 @@ public final class AggregateRTree implements Serializable {
     return root == null ? 0 : root.objectCount();
   }
 
+  public double totalProbabilityMass() {
+    return root == null ? 0.0 : root.probabilityMass();
+  }
+
+  public List<ProbabilisticInstance> getAllLocalInstances() {
+    List<ProbabilisticInstance> instances = new ArrayList<>();
+    if (root != null) {
+      collectLocalInstances(root, instances);
+    }
+    return instances;
+  }
+
+  private void collectLocalInstances(Node node, List<ProbabilisticInstance> instances) {
+    if (node.leaf()) {
+      for (ObjectEntry oe : node.objects()) {
+        instances.addAll(oe.instances());
+      }
+    } else {
+      for (Node child : node.children()) {
+        collectLocalInstances(child, instances);
+      }
+    }
+  }
+
   /**
    * Returns an index-distribution view carrying only aggregate MBR nodes and masses.
    *
