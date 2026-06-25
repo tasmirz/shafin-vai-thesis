@@ -117,6 +117,10 @@ ablation-test:
 three-way-compare:
     scripts/research/run_three_way_comparison.sh
 
+# run the full 8-variant comparison with paper validation (Spark + Hadoop baseline/aes/dscp/aes+dscp)
+full-compare:
+    PROFILE="${PROFILE:-smartphone}" scripts/research/run_full_comparison_suite.sh
+
 # run the four ICCIT treatments against a curated profile and create a comparison report
 iccit-compare:
     PROFILE="${PROFILE:-smartphone}" SUITE_ID={{ run_id }} K="${K:-10}" PARTITIONS="${PARTITIONS:-8}" \

@@ -96,9 +96,10 @@ def main():
         hi = hadoop_iccit.get("algorithmElapsedMs", 1)
         ha = hadoop_aes.get("algorithmElapsedMs", 1) if hadoop_aes else 0
         hd = hadoop_dscp.get("algorithmElapsedMs", 1) if hadoop_dscp else 0
-        print(f"  Hadoop AES-only   : {ha}ms  (vs baseline {hb}ms → {pct(hb, ha)} reduction)  [paper: ~32.7% synthetic]")
-        print(f"  Hadoop DSCP-only  : {hd}ms  (vs baseline {hb}ms → {pct(hb, hd)} reduction)  [paper: ~12.0% synthetic]")
-        print(f"  Hadoop AES+DSCP   : {hi}ms  (vs baseline {hb}ms → {pct(hb, hi)} reduction)  [paper: ~34.2% synthetic]")
+        hb_val = hb
+        print(f"  Hadoop AES-only   : {ha}ms  (vs baseline {hb}ms → {pct(hb, ha)} reduction)  [ICCIT 2025 Table III: 32.7% synthetic / 23.6% road]")
+        print(f"  Hadoop DSCP-only  : {hd}ms  (vs baseline {hb}ms → {pct(hb, hd)} reduction)  [ICCIT 2025 Table III: 12.0% synthetic / 16.8% road]")
+        print(f"  Hadoop AES+DSCP   : {hi}ms  (vs baseline {hb}ms → {pct(hb, hi)} reduction)  [ICCIT 2025 Table II: 34.2% synthetic / 24.7% road]")
 
     if spark_baseline and spark_new:
         sb = spark_baseline.get("algorithmElapsedMs", 1)
