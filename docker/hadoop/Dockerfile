@@ -12,11 +12,14 @@ RUN apt-get update \
 
 RUN set -eux; \
     for attempt in 1 2 3 4 5; do \
-      curl --fail --location --silent --show-error --continue-at - \
-        "https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz" \
-        -o /tmp/hadoop.tar.gz && break; \
+      url="https://dlcdn.apache.org/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz"; \
+      if [ "$attempt" -gt 2 ]; then \
+        url="https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz"; \
+      fi; \
+      curl --fail --location --silent --show-error --connect-timeout 30 --max-time 600 --continue-at - \
+        "$url" -o /tmp/hadoop.tar.gz && break; \
       test "$attempt" -lt 5; \
-      sleep 3; \
+      sleep 5; \
     done; \
     tar -xzf /tmp/hadoop.tar.gz -C /opt \
     && mv "/opt/hadoop-${HADOOP_VERSION}" "${HADOOP_HOME}" \
