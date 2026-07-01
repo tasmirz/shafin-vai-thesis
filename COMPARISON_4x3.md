@@ -2,7 +2,7 @@
 
 **Dataset:** Smartphone (750 objects, 207,860 rows, 20 queries, k=10, partitions=8)  
 **Paper Reference:** ICCIT 2025, Table II — Synthetic Smartphone  
-**Generated:** 2026-06-25
+**Generated:** 2026-07-01
 
 ---
 
@@ -10,10 +10,10 @@
 
 | Algorithm | ICCIT Paper (Hadoop) | Hadoop MapReduce (Observed) | Apache Spark (Observed) |
 |-----------|---------------------|----------------------------|------------------------|
-| **Rai-Lian Baseline** | 66,520 | 91,214 | 41,800 |
-| **AES-only** | 44,760 | 74,349 | 37,050 |
-| **DSCP-only** | 58,484 | 76,556 | 43,303 |
-| **AES+DSCP** | 43,757 | 73,597 | 36,527 |
+| **Rai-Lian Baseline** | 66,520 | 91,214 | 93,583 |
+| **AES-only** | 44,760 | 74,349 | 84,320 |
+| **DSCP-only** | 58,484 | 76,556 | 69,026 |
+| **AES+DSCP** | 43,757 | 73,597 | 70,184 |
 
 ---
 
@@ -21,9 +21,9 @@
 
 | Algorithm | ICCIT Paper Reduction | Hadoop MapReduce Reduction | Spark Reduction |
 |-----------|----------------------|---------------------------|----------------|
-| **AES-only** | 32.7% | 18.5% | 11.4% |
-| **DSCP-only** | 12.0% | 16.1% | -3.6% |
-| **AES+DSCP** | 34.2% | 19.3% | 12.6% |
+| **AES-only** | 32.7% | 18.5% | 9.90% |
+| **DSCP-only** | 12.0% | 16.1% | 26.24% |
+| **AES+DSCP** | 34.2% | 19.3% | 25.00% |
 
 ---
 
@@ -41,11 +41,10 @@
 - DSCP-only (16.1%) slightly outperforms AES-only (18.5%) in reduction
 
 ### Apache Spark (Observed)
-- **All Spark variants are 2–2.5× faster** than Hadoop MapReduce on same machine
-- Spark baseline: 41,800 ms (2.2× faster than Hadoop baseline)
-- AES+DSCP: 36,527 ms (12.6% reduction vs Spark baseline)
-- DSCP-only **increases** time vs baseline (-3.6% reduction) — overhead without sufficient pruning benefit
-- Best absolute performance: **Spark AES+DSCP at 36,527 ms**
+- Spark baseline: 93,583 ms (comparable to observed Hadoop baseline on same machine)
+- AES+DSCP achieves **25.00%** reduction vs Spark baseline (93,583 → 70,184 ms)
+- DSCP-only achieves **26.24%** reduction vs Spark baseline (93,583 → 69,026 ms)
+- Best absolute performance: **Spark DSCP-only at 69,026 ms**
 
 ---
 
@@ -63,10 +62,10 @@
 | **ii. ICCIT (Hadoop)** | `aes-only` | 74,349 |
 |  | `aes-dscp` | 73,597 |
 |  | `dscp-only` | 76,556 |
-| **iii. Spark Re-implementation (ICCIT)** | `aes-only` | 37,050 |
-|  | `aes-dscp` | 36,527 |
-|  | `dscp-only` | 43,303 |
-| **iv. Spark Rai-Lian** | `baseline` | 41,800 |
+| **iii. Spark Re-implementation (ICCIT)** | `aes-only` | 84,320 |
+|  | `aes-dscp` | 70,184 |
+|  | `dscp-only` | 69,026 |
+| **iv. Spark Rai-Lian** | `baseline` | 93,583 |
 
 ---
 
@@ -78,10 +77,10 @@
 | `smartphone-hadoop-aes-only` | Hadoop | aes-only |
 | `smartphone-hadoop-dscp-only` | Hadoop | dscp-only |
 | `smartphone-hadoop-aes-dscp` | Hadoop | aes-dscp |
-| `iccit-smartphone-str-20260527T073310Z-baseline` | Spark | baseline |
-| `iccit-smartphone-str-20260527T073310Z-aes-only` | Spark | aes-only |
-| `iccit-smartphone-str-20260527T073310Z-dscp-only` | Spark | dscp-only |
-| `iccit-smartphone-str-20260527T073310Z-aes-dscp` | Spark | aes-dscp |
+| `iccit-spark-20260701T071945Z-baseline` | Spark | baseline |
+| `iccit-spark-20260701T071945Z-aes-only` | Spark | aes-only |
+| `iccit-spark-20260701T071945Z-dscp-only` | Spark | dscp-only |
+| `iccit-spark-20260701T071945Z-aes-dscp` | Spark | aes-dscp |
 
 ---
 

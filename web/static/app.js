@@ -533,6 +533,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("csv-launch-form").addEventListener("submit", event => launch(event, "csv"));
   document.getElementById("stream-launch-form").addEventListener("submit", event => launch(event, "stream"));
   document.getElementById("paper-suite-launch-form").addEventListener("submit", event => launch(event, "paper-suite"));
+  document.getElementById("full-compare-launch-form").addEventListener("submit", event => launch(event, "full-compare"));
   document.getElementById("hadoop-aes-dscp-test-form").addEventListener("submit", event => launch(event, "hadoop-aes-dscp-test"));
   document.getElementById("smartphone-generate-form").addEventListener("submit", event => launch(event, "smartphone"));
   document.getElementById("osm-generate-form").addEventListener("submit", event => launch(event, "osm"));

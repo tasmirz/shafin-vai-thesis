@@ -198,6 +198,35 @@
           <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
           <button class="button primary" type="submit">Launch paper setup</button>
         </form>
+        <form class="panel form-card" id="full-compare-launch-form">
+          <div class="badge teal">Cross-Engine Setup</div>
+          <h3>Full 8-variant comparison</h3>
+          <p class="subtle">Run all 4 variants on Hadoop MapReduce and Apache Spark to generate the full comparison report.</p>
+          <div class="field-pair">
+            <label>Suite ID<input name="runId" required value="full-compare-web"></label>
+            <label>Curated profile
+              <select name="profile">
+                <option value="smartphone" selected>Smartphone, 20 queries</option>
+                <option value="road-smoke">Bangladesh OSM smoke</option>
+                <option value="road-full">Bangladesh OSM, 98,451 MBRs</option>
+                <option value="road-full-20q">Bangladesh OSM, 98,451 MBRs, fixed 20 queries</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-pair">
+            <label>k<input type="number" min="1" name="k" value="10"></label>
+            <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
+          </div>
+          <div class="field-pair">
+            <label>Spark driver memory<input name="sparkDriverMemory" value="8g"></label>
+            <label class="check"><input type="checkbox" name="buildImage"> Rebuild image</label>
+          </div>
+          <label class="check"><input type="checkbox" name="runHadoop" checked> Run Hadoop MapReduce variants</label>
+          <label class="check"><input type="checkbox" name="runSpark" checked> Run Apache Spark variants</label>
+          <label class="check"><input type="checkbox" name="validateExact"> Enable exact oracle for validation</label>
+          <label class="check"><input type="checkbox" name="allowFullRoad"> Confirm full OSM execution for the 98,451-object profile</label>
+          <button class="button primary" type="submit">Launch full comparison</button>
+        </form>
         <form class="panel form-card" id="hadoop-aes-dscp-test-form">
           <div class="badge">Hadoop Reference Check</div>
           <h3>AES+DSCP comparison guard</h3>

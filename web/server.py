@@ -649,9 +649,9 @@ JOB_LOCK = threading.Lock()
 
 def launch_job(payload: dict) -> dict:
   mode = payload.get("mode")
-  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite", "hadoop-aes-dscp-test"}:
+  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite", "hadoop-aes-dscp-test", "full-compare"}:
     raise ValueError(
-        "Mode must be csv, stream, smartphone, osm, paper-suite or hadoop-aes-dscp-test.")
+        "Mode must be csv, stream, smartphone, osm, paper-suite, hadoop-aes-dscp-test, or full-compare.")
   run_id = require_run_id(str(payload.get("runId", "")))
   if mode in {"csv", "stream"} and (RUN_ROOT / run_id).exists():
     raise ValueError("A saved run already exists with this ID.")
@@ -729,6 +729,28 @@ def launch_job(payload: dict) -> dict:
     command = (
         [sys.executable, script, "smartphone", *common] if mode == "smartphone"
         else ["uv", "run", "--with", "pyproj", script, "osm", *common])
+  elif mode == "full-compare":
+    profile = str(payload.get("profile", "smartphone")).lower()
+    if profile not in {"smartphone", "road-smoke", "road-full", "road-full-20q"}:
+      raise ValueError("profile must be smartphone, road-smoke, road-full or road-full-20q.")
+    allow_full_road = payload.get("allowFullRoad") in {True, "on", "true"}
+    if profile in {"road-full", "road-full-20q"} and not allow_full_road:
+      raise ValueError("Confirm full OSM execution before launching the 98,451-object profile.")
+    driver_memory = str(payload.get("sparkDriverMemory", "8g")).lower()
+    if not re.fullmatch(r"[1-9][0-9]*[gm]", driver_memory):
+      raise ValueError("sparkDriverMemory must be a positive size such as 4g or 8192m.")
+    env.update({
+        "PROFILE": profile,
+        "SUITE_ID": run_id,
+        "K": positive_int(payload.get("k", 10), "k"),
+        "PARTITIONS": positive_int(payload.get("partitions", 8), "partitions"),
+        "SPARK_DRIVER_MEMORY": driver_memory,
+        "VALIDATE_EXACT": "true" if payload.get("validateExact") in {True, "on", "true"} else "false",
+        "ALLOW_FULL_ROAD": "true" if allow_full_road else "false",
+        "RUN_HADOOP": "true" if payload.get("runHadoop") in {True, "on", "true"} else "false",
+        "RUN_SPARK": "true" if payload.get("runSpark") in {True, "on", "true"} else "false",
+    })
+    command = [str(ROOT / "scripts" / "research" / "run_full_comparison_suite.sh")]
   else:
     setup = str(payload.get("setup", "paired")).lower()
     if setup not in {"rai-baseline", "iccit-upgrade", "paired", "ablation"}:
