@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "dataset": "synthetic-smartphone",
+  "createdUtc": "2026-07-01T09:36:47.753826+00:00",
+  "csvPath": "tests/fixtures/csv/smartphone-1k.csv",
+  "csvSha256": "aae33922481ecf80955b370177d7b729d3dccda83d870c82f8bd1a4f1d5ef9bb",
+  "objects": 125,
+  "rows": 998,
+  "queries": 1,
+  "instancesPerObject": {
+    "minimum": 5,
+    "maximum": 11
+  },
+  "probabilityPolicy": "normalized appearance probability per object and query",
+  "seed": 42,
+  "partitions": 8,
+  "partitionIndex": [
+    {
+      "serverId": 0,
+      "objects": 13,
+      "instances": 93,
+      "mbr": [
+        0.071,
+        0.08,
+        0.91,
+        0.643
+      ]
+    },
+    {
+      "serverId": 1,
+      "objects": 16,
+      "instances": 122,
+      "mbr": [
+        0.056,
+        0.043,
+        0.999,
+        0.654
+      ]
+    },
+    {
+      "serverId": 2,
+      "objects": 15,
+      "instances": 114,
+      "mbr": [
+        0.047,
+        0.088,
+        0.977,
+        0.658
+      ]
+    },
+    {
+      "serverId": 3,
+      "objects": 12,
+      "instances": 94,
+      "mbr": [
+        0.361,
+        0.08,
+        0.998,
+        0.698
+      ]
+    },
+    {
+      "serverId": 4,
+      "objects": 18,
+      "instances": 162,
+      "mbr": [
+        0.053,
+        0.073,
+        0.962,
+        0.674
+      ]
+    },
+    {
+      "serverId": 5,
+      "objects": 14,
+      "instances": 99,
+      "mbr": [
+        0.048,
+        0.077,
+        0.951,
+        0.653
+      ]
+    },
+    {
+      "serverId": 6,
+      "objects": 19,
+      "instances": 164,
+      "mbr": [
+        0.062,
+        0.0,
+        0.973,
+        0.664
+      ]
+    },
+    {
+      "serverId": 7,
+      "objects": 18,
+      "instances": 150,
+      "mbr": [
+        0.05,
+        0.031,
+        0.95,
+        0.691
+      ]
+    }
+  ],
+  "validation": {
+    "rows": 998,
+    "objectQueryGroups": 125,
+    "normalizationErrors": 0,
+    "mbrContainmentErrors": 0,
+    "serverAssignmentErrors": 0,
+    "passed": true
+  },
+  "attributes": [
+    "normalized_price",
+    "inverse_normalized_battery"
+  ]
+}

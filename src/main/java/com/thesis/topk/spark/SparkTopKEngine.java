@@ -330,10 +330,16 @@ public final class SparkTopKEngine {
     long falsePruneCount = 0L;
     if (validateExact) {
       long validationStart = System.nanoTime();
-      List<String> exactIds = ProbabilisticTopK.exactTopK(allForQuery, queryPoint, k).stream()
+      List<CandidateScore> exactTopK = ProbabilisticTopK.exactTopK(allForQuery, queryPoint, k);
+      List<String> exactIds = exactTopK.stream()
           .map(CandidateScore::objectId)
           .toList();
       exactAgreement = topK.stream().map(CandidateScore::objectId).toList().equals(exactIds);
+      if (!exactAgreement) {
+        System.err.println("EXACT AGREEMENT FAILED for query=" + queryPoint.queryId());
+        System.err.println("Spark TopK: " + topK.stream().map(c -> c.objectId() + "=" + c.exactScore()).toList());
+        System.err.println("Java Oracle: " + exactTopK.stream().map(c -> c.objectId() + "=" + c.exactScore()).toList());
+      }
       if (indexedMbrPath || algorithm.dscpEnabled()) {
         List<String> survivorIds = survivors.map(CandidateEnvelope::objectId).collect();
         falsePruneCount = exactIds.stream().filter(id -> !survivorIds.contains(id)).count();
