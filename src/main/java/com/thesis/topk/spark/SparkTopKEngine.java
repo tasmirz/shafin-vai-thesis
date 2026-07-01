@@ -460,9 +460,15 @@ public final class SparkTopKEngine {
           int level = selection.getValue();
           if (targetPartition == partitionId) {
             // Local partition: use exact instance-level scoring
-            instanceLower += DominanceScorer.expectedDominanceScore(
-                object.instances(), allLocalInstances, queryPoint);
-            instanceUpper += instanceLower; // Exact for local
+            double localDominatedMass = 0.0;
+            for (ProbabilisticInstance other : allLocalInstances) {
+              if (!candidate.objectId().equals(other.objectId())
+                  && DominanceScorer.dynamicallyDominates(candidate, other, queryPoint)) {
+                localDominatedMass += other.probability();
+              }
+            }
+            instanceLower += localDominatedMass;
+            instanceUpper += localDominatedMass; // Exact for local
           } else {
               // Remote partition: use conservative upper bound (LB + objectMass * remoteMass)
             // instead of loose aR-tree partial upper mass - enables effective DSCP pruning
