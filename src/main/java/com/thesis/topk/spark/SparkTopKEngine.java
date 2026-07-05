@@ -619,6 +619,9 @@ public final class SparkTopKEngine {
     List<Tuple2<Integer, PartialMbrWork>> records = new ArrayList<>();
     for (ProbabilisticInstance instance : candidate.instances()) {
       for (Map.Entry<Integer, Integer> selection : exportedLevels.entrySet()) {
+        if (selection.getKey().intValue() == candidate.partitionId()) {
+          continue;
+        }
         Inspection inspection = indexes.get(selection.getKey())
             .inspectAtLevel(instance, queryPoint, selection.getValue());
         if (!inspection.partiallyDominatedNodes().isEmpty()) {
