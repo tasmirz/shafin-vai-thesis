@@ -106,5 +106,8 @@ if baseline and full:
 print("ablationAssertions=passed emissionChecks=true exactValidation=" + sys.argv[2])
 PY
 
+echo "Generating comparison plots..."
+.venv/bin/python3 scripts/research/generate_plots.py "$SUITE_ID" || echo "Plot generation skipped or failed."
+
 echo "== Controlled ablation comparison =="
 python3 scripts/research/compare_runs.py "${RUNS[@]}"

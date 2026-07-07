@@ -365,6 +365,9 @@ output.write_text(report)
 print(f"fullComparisonReport={output}")
 VALIDATE_PY
 
+echo "Generating comparison plots..."
+.venv/bin/python3 scripts/research/generate_plots.py "$SUITE_ID" || echo "Plot generation skipped or failed."
+
 echo ""
 echo "=== Summary ==="
 echo "Suite ID: $SUITE_ID"

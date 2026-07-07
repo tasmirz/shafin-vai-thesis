@@ -17,20 +17,14 @@
       </div>
       <nav id="navigation" aria-label="Research modules">
         <button class="nav-link active" data-view="dashboard">Dashboard</button>
-        <button class="nav-link" data-view="launcher">Data Simulator</button>
-        <button class="nav-link" data-view="datasets">Datasets</button>
-        <button class="nav-link" data-view="algorithms">Algorithms</button>
-        <button class="nav-link" data-view="pipeline">Pipeline</button>
         <button class="nav-link" data-view="runs">Runs &amp; Compare</button>
-        <button class="nav-link" data-view="validation">Validation</button>
-        <button class="nav-link" data-view="results">Results</button>
-        <button class="nav-link" data-view="artifacts">Artifacts</button>
+        <button class="nav-link" data-view="visualizations">Visualizations</button>
       </nav>
       <div class="runtime">
         <span class="pulse"></span>
         <div>
           <strong>Spark runtime</strong>
-          <small>MQTT -> Kafka -> Structured Streaming</small>
+          <small>Batch Validation &amp; Structured Streaming</small>
         </div>
       </div>
     </aside>
@@ -43,7 +37,6 @@
         </div>
         <div class="top-actions">
           <button class="button ghost" id="refresh-button">Refresh evidence</button>
-          <button class="button primary" data-open-view="launcher">New benchmark</button>
         </div>
       </header>
 
@@ -54,292 +47,19 @@
             <h3>Every reported number retains its evidence.</h3>
             <p class="lede" id="project-subtitle"></p>
           </div>
-          <div class="pipeline-ribbon" id="pipeline-ribbon"></div>
         </section>
+        
         <div class="stat-grid" id="dashboard-stats"></div>
-        <div class="two-column wide-left">
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">Recent evidence</p>
-                <h3>Saved benchmark runs</h3>
-              </div>
-              <button class="text-action" data-open-view="runs">Compare setups</button>
-            </div>
-            <div id="recent-runs"></div>
-          </section>
-          <section class="panel">
-            <p class="eyebrow">Paper reproduction gate</p>
-            <h3>Reported targets</h3>
-            <div id="paper-targets"></div>
-            <div class="callout warning">
-              Paper reproduction is not claimed until paper-shaped datasets and observed system-cost measurements are available.
-            </div>
-          </section>
-        </div>
+        
         <section class="panel">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Scientific hygiene</p>
-              <h3>Current warnings and capability status</h3>
+              <p class="eyebrow">Recent evidence</p>
+              <h3>Saved benchmark runs</h3>
             </div>
+            <button class="text-action" data-open-view="runs">Compare setups</button>
           </div>
-          <div class="capability-grid">
-            <div>
-              <h4>Implemented</h4>
-              <ul class="status-list implemented" id="implemented-capabilities"></ul>
-            </div>
-            <div>
-              <h4>Pending instrumentation</h4>
-              <ul class="status-list pending" id="pending-capabilities"></ul>
-            </div>
-            <div>
-              <h4>Warnings</h4>
-              <ul class="status-list warnings" id="dashboard-warnings"></ul>
-            </div>
-          </div>
-        </section>
-      </section>
-
-      <section class="view" id="launcher-view">
-        <div class="section-intro">
-          <p class="eyebrow">Execution control</p>
-          <h3>Launch reproducible benchmark profiles</h3>
-          <p>Each successful launch writes an immutable saved run with metrics, validation evidence and logs.</p>
-        </div>
-        <div class="two-column">
-          <form class="panel form-card" id="csv-launch-form">
-            <div class="badge">CSV -> Spark</div>
-            <h3>CSV validation setup</h3>
-            <p class="subtle">Run a bounded CSV dataset through Spark and the exact oracle.</p>
-            <label>Run ID<input name="runId" required value="csv-web-run"></label>
-            <label>CSV path<input name="csvPath" value="tests/fixtures/csv/smartphone-small.csv"></label>
-            <label>Algorithm variant
-              <select name="algorithm">
-                <option value="baseline">Baseline distributed PTD</option>
-                <option value="dscp-only">DSCP-only</option>
-                <option value="aes-only">AES-only</option>
-                <option value="aes-dscp" selected>AES + DSCP</option>
-              </select>
-            </label>
-            <div class="field-pair">
-              <label>k<input type="number" min="1" name="k" value="2"></label>
-              <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
-            </div>
-            <div class="field-pair">
-              <label>Seed<input type="number" name="seed" value="42"></label>
-              <label>Synopsis bins<input type="number" min="1" name="synopsisBins" value="4"></label>
-            </div>
-            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
-            <button class="button primary" type="submit">Launch CSV run</button>
-          </form>
-
-          <form class="panel form-card" id="stream-launch-form">
-            <div class="badge teal">MQTT -> Kafka -> Spark</div>
-            <h3>Streaming validation setup</h3>
-            <p class="subtle">Publish a finite workload and consume it using Spark Structured Streaming.</p>
-            <label>Run ID<input name="runId" required value="stream-web-run"></label>
-            <label>Algorithm variant
-              <select name="algorithm">
-                <option value="baseline">Baseline distributed PTD</option>
-                <option value="dscp-only">DSCP-only</option>
-                <option value="aes-only">AES-only</option>
-                <option value="aes-dscp" selected>AES + DSCP</option>
-              </select>
-            </label>
-            <div class="field-pair">
-              <label>Objects<input type="number" min="1" name="objects" value="12"></label>
-              <label>Queries<input type="number" min="1" name="queries" value="2"></label>
-            </div>
-            <div class="field-pair">
-              <label>Dimensions<input type="number" min="1" name="dimensions" value="2"></label>
-              <label>k<input type="number" min="1" name="k" value="2"></label>
-            </div>
-            <div class="field-pair">
-              <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
-              <label>Publish rate/s<input type="number" min="1" name="ratePerSecond" value="100"></label>
-            </div>
-            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
-            <button class="button primary" type="submit">Launch stream run</button>
-          </form>
-        </div>
-        <form class="panel form-card" id="paper-suite-launch-form">
-          <div class="badge teal">Paper Comparison Setup</div>
-          <h3>Rai-Lian baseline and ICCIT Spark upgrade</h3>
-          <p class="subtle">Run a curated dataset as the indexed control, upgraded AES+DSCP method, paired comparison, or full ablation. Published Hadoop values remain reference-only.</p>
-          <div class="field-pair">
-            <label>Setup ID<input name="runId" required value="paper-paired-web"></label>
-            <label>Setup
-              <select name="setup">
-                <option value="rai-baseline">Spark Rai-Lian indexed baseline</option>
-                <option value="iccit-upgrade">Spark ICCIT AES + DSCP</option>
-                <option value="paired" selected>Paired baseline vs upgrade</option>
-                <option value="ablation">Full four-treatment ablation</option>
-              </select>
-            </label>
-          </div>
-          <div class="field-pair">
-            <label>Curated profile
-              <select name="profile">
-                <option value="smartphone" selected>Smartphone, 20 queries</option>
-                <option value="road-smoke">Bangladesh OSM smoke</option>
-                <option value="road-full">Bangladesh OSM, 98,451 MBRs</option>
-                <option value="road-full-20q">Bangladesh OSM, 98,451 MBRs, fixed 20 queries</option>
-              </select>
-            </label>
-            <label>k<input type="number" min="1" name="k" value="10"></label>
-          </div>
-          <div class="field-pair">
-            <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
-            <label>Spark driver memory<input name="sparkDriverMemory" value="8g"></label>
-          </div>
-          <label class="check"><input type="checkbox" name="validateExact"> Enable exact oracle for validation-scale runs</label>
-          <label class="check"><input type="checkbox" name="allowFullRoad"> Confirm full OSM execution for the 98,451-object profile</label>
-          <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
-          <button class="button primary" type="submit">Launch paper setup</button>
-        </form>
-        <form class="panel form-card" id="full-compare-launch-form">
-          <div class="badge teal">Cross-Engine Setup</div>
-          <h3>Full 8-variant comparison</h3>
-          <p class="subtle">Run all 4 variants on Hadoop MapReduce and Apache Spark to generate the full comparison report.</p>
-          <div class="field-pair">
-            <label>Suite ID<input name="runId" required value="full-compare-web"></label>
-            <label>Curated profile
-              <select name="profile">
-                <option value="smartphone" selected>Smartphone, 20 queries</option>
-                <option value="road-smoke">Bangladesh OSM smoke</option>
-                <option value="road-full">Bangladesh OSM, 98,451 MBRs</option>
-                <option value="road-full-20q">Bangladesh OSM, 98,451 MBRs, fixed 20 queries</option>
-              </select>
-            </label>
-          </div>
-          <div class="field-pair">
-            <label>k<input type="number" min="1" name="k" value="10"></label>
-            <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
-          </div>
-          <div class="field-pair">
-            <label>Spark driver memory<input name="sparkDriverMemory" value="8g"></label>
-            <label class="check"><input type="checkbox" name="buildImage"> Rebuild image</label>
-          </div>
-          <label class="check"><input type="checkbox" name="runHadoop" checked> Run Hadoop MapReduce variants</label>
-          <label class="check"><input type="checkbox" name="runSpark" checked> Run Apache Spark variants</label>
-          <label class="check"><input type="checkbox" name="validateExact"> Enable exact oracle for validation</label>
-          <label class="check"><input type="checkbox" name="allowFullRoad"> Confirm full OSM execution for the 98,451-object profile</label>
-          <button class="button primary" type="submit">Launch full comparison</button>
-        </form>
-        <form class="panel form-card" id="hadoop-aes-dscp-test-form">
-          <div class="badge">Hadoop Reference Check</div>
-          <h3>AES+DSCP comparison guard</h3>
-          <p class="subtle">Run the paired baseline and AES+DSCP fixture test, then verify the Hadoop values remain reference-only in the generated report.</p>
-          <label>Suite ID<input name="runId" required value="hadoop-aes-dscp-web"></label>
-          <label>CSV path<input name="csvPath" value="tests/fixtures/csv/smartphone-small.csv"></label>
-          <div class="field-pair">
-            <label>k<input type="number" min="1" name="k" value="2"></label>
-            <label>Partitions<input type="number" min="1" name="partitions" value="2"></label>
-          </div>
-          <div class="field-pair">
-            <label>Trace rows<input type="number" min="1" name="traceLimit" value="10"></label>
-            <label class="check"><input type="checkbox" name="buildImage"> Rebuild Spark image before run</label>
-          </div>
-          <button class="button primary" type="submit">Launch reference check</button>
-        </form>
-        <div class="two-column">
-          <form class="panel form-card" id="smartphone-generate-form">
-            <div class="badge">Paper Dataset</div>
-            <h3>Synthetic smartphone uncertainty</h3>
-            <p class="subtle">Generate normalized object instances with persistent object-to-server assignment.</p>
-            <label>Dataset ID<input name="runId" required value="smartphone-paper"></label>
-            <div class="field-pair">
-              <label>Objects<input type="number" min="1" name="objects" value="100"></label>
-              <label>Queries<input type="number" min="1" name="queries" value="1"></label>
-            </div>
-            <div class="field-pair">
-              <label>Min instances<input type="number" min="1" name="instancesMin" value="5"></label>
-              <label>Max instances<input type="number" min="1" name="instancesMax" value="11"></label>
-            </div>
-            <div class="field-pair">
-              <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
-              <label>Seed<input type="number" name="seed" value="42"></label>
-            </div>
-            <button class="button primary" type="submit">Generate smartphone dataset</button>
-          </form>
-          <form class="panel form-card" id="osm-generate-form">
-            <div class="badge teal">Spatial Dataset</div>
-            <h3>Bangladesh OSM road MBRs</h3>
-            <p class="subtle">Convert road line bounds to EPSG:9678 MBRs and sample normalized uncertain instances.</p>
-            <label>Dataset ID<input name="runId" required value="bangladesh-road-paper"></label>
-            <div class="field-pair">
-              <label>Road objects<input type="number" min="1" name="objects" value="98451"></label>
-              <label>Queries<input type="number" min="1" name="queries" value="1"></label>
-            </div>
-            <div class="field-pair">
-              <label>Min instances<input type="number" min="1" name="instancesMin" value="5"></label>
-              <label>Max instances<input type="number" min="1" name="instancesMax" value="11"></label>
-            </div>
-            <div class="field-pair">
-              <label>Partitions<input type="number" min="1" name="partitions" value="8"></label>
-              <label>Seed<input type="number" name="seed" value="42"></label>
-            </div>
-            <button class="button primary" type="submit">Curate OSM dataset</button>
-          </form>
-        </div>
-        <section class="panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Job console</p>
-              <h3>Web-launched executions</h3>
-            </div>
-            <button class="text-action" id="refresh-jobs">Refresh jobs</button>
-          </div>
-          <div id="job-console" class="empty-state">No benchmark has been launched from this server process.</div>
-        </section>
-      </section>
-
-      <section class="view" id="datasets-view">
-        <div class="section-intro">
-          <p class="eyebrow">Data inspector</p>
-          <h3>Raw CSV and input quality</h3>
-          <p>Inspect real records before benchmarking. The current pipeline accepts incomplete stream-event CSV data.</p>
-        </div>
-        <section class="panel dataset-controls">
-          <label>Project CSV path
-            <input id="csv-profile-path" value="tests/fixtures/csv/smartphone-small.csv">
-          </label>
-          <button class="button primary" id="inspect-csv">Inspect dataset</button>
-        </section>
-        <div id="csv-profile"></div>
-        <div class="two-column">
-          <section class="panel">
-            <p class="eyebrow">Spatial readiness</p>
-            <h3>Bangladesh OSM protocol</h3>
-            <div id="osm-readiness"></div>
-          </section>
-          <section class="panel">
-            <p class="eyebrow">Generated datasets</p>
-            <h3>Curated artifact manifests</h3>
-            <div id="paper-datasets"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="view" id="algorithms-view">
-        <div class="section-intro">
-          <p class="eyebrow">Algorithm registry</p>
-          <h3>Available and required variants</h3>
-          <p>The registry separates implemented behavior from the paper reproduction work that remains.</p>
-        </div>
-        <div class="algorithm-grid" id="algorithm-grid"></div>
-      </section>
-
-      <section class="view" id="pipeline-view">
-        <div class="section-intro">
-          <p class="eyebrow">Pipeline debugger</p>
-          <h3>Bounded stream-to-result execution path</h3>
-          <p>Stage details expose what is measured today and which internal counters still require algorithm instrumentation.</p>
-        </div>
-        <section class="panel pipeline-viewer">
-          <div class="stage-list" id="stage-list"></div>
-          <article class="stage-detail" id="stage-detail"></article>
+          <div id="recent-runs"></div>
         </section>
       </section>
 
@@ -347,7 +67,7 @@
         <div class="section-intro">
           <p class="eyebrow">Experiment tracking</p>
           <h3>Saved runs and configuration comparison</h3>
-          <p>Select two or more immutable runs. The comparison refuses to conceal differences in benchmark setup.</p>
+          <p>Select two or more immutable runs to compute a fair-comparison report.</p>
         </div>
         <section class="panel">
           <div class="section-head">
@@ -361,82 +81,17 @@
         </section>
       </section>
 
-      <section class="view" id="validation-view">
-        <div class="section-intro">
-          <p class="eyebrow">Correctness center</p>
-          <h3>Exactness before performance claims</h3>
-          <p>Executed Spark rankings are paired with brute-force agreement checks in each stored validation run.</p>
-        </div>
-        <div id="validation-cards" class="validation-grid"></div>
-        <section class="panel">
-          <h3>Required validation gates</h3>
-          <div class="gate-grid">
-            <div class="gate passed">Exact top-k agreement<span>Captured for implemented test profiles</span></div>
-            <div class="gate passed">Immutable run evidence<span>Manifests, metrics and logs</span></div>
-            <div class="gate passed">Probability normalization<span>Audited for generated uncertain-object artifacts</span></div>
-            <div class="gate passed">AES emission comparison<span>Expanded versus aggregated executed records</span></div>
-            <div class="gate passed">DSCP false-prune audit<span>Checked against exact top-k for validated runs</span></div>
-            <div class="gate passed">MBR consistency<span>Sample points checked against generated road MBRs</span></div>
-          </div>
-        </section>
-      </section>
-
-      <section class="view" id="results-view">
+      <section class="view" id="visualizations-view">
         <div class="section-intro">
           <p class="eyebrow">Result analytics</p>
-          <h3>Measured runtimes and pruning evidence</h3>
-          <p>Charts below use saved local executions, not paper target values. Select a bar to inspect its artifacts.</p>
-        </div>
-        <div class="two-column">
-          <section class="panel">
-            <h3>Algorithm elapsed time</h3>
-            <div id="runtime-chart" class="bar-chart"></div>
-          </section>
-          <section class="panel">
-            <h3>Average candidate filtering ratio</h3>
-            <div id="pruning-chart" class="bar-chart"></div>
-          </section>
+          <h3>Generated Figures</h3>
+          <p class="subtle">Charts generated automatically after full comparisons or dataset ablations.</p>
         </div>
         <section class="panel">
-          <h3>Communication metrics boundary</h3>
-          <p class="callout info">Finite Spark runs now capture actual task-level shuffle bytes and records, phase timing, GC time and a straggler ratio. Report paper results only from comparable validated runs.</p>
-          <div id="telemetry-summary"></div>
-        </section>
-        <section class="panel">
-          <h3>Baseline vs ICCIT Hadoop and Spark treatments</h3>
-          <div id="hadoop-reference-comparison"></div>
-        </section>
-        <section class="panel">
-          <h3>All-dataset comparison report</h3>
-          <div id="all-dataset-report"></div>
-        </section>
-        <section class="panel">
-          <h3>Paper-style comparable figures</h3>
-          <p class="subtle">Observed Spark figures are generated from saved evidence; published Hadoop values remain reference-only.</p>
           <div id="paper-figures" class="paper-figures"></div>
         </section>
-        <div class="two-column">
-          <section class="panel">
-            <h3>Experiment matrix</h3>
-            <p class="subtle">Default paper reproduction and ablation plan.</p>
-            <div id="experiment-matrix"></div>
-          </section>
-          <section class="panel">
-            <h3>Academic report export</h3>
-            <p class="subtle">Generate a LaTeX table from currently saved benchmark evidence.</p>
-            <a class="button primary download" href="/api/reports/latex">Export LaTeX results table</a>
-          </section>
-        </div>
       </section>
 
-      <section class="view" id="artifacts-view">
-        <div class="section-intro">
-          <p class="eyebrow">Reproducibility packages</p>
-          <h3>Export evidence bundles</h3>
-          <p>Bundle exports contain exactly the stored run artifacts: manifest, metrics, CSV measurements and captured logs.</p>
-        </div>
-        <div id="artifact-grid" class="artifact-grid"></div>
-      </section>
     </main>
 
     <aside class="drawer" id="detail-drawer" aria-hidden="true">
@@ -451,6 +106,7 @@
     </aside>
     <div class="overlay" id="overlay"></div>
     <div class="toast" id="toast" role="status"></div>
+    
     <script src="/app.js" defer></script>
   </body>
 </html>

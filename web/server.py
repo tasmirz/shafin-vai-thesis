@@ -401,9 +401,10 @@ def latex_report(ids: list[str]) -> str:
 def paper_figures() -> list[dict]:
   if not FIGURE_ROOT.exists():
     return []
+  figures = list(FIGURE_ROOT.glob("*.svg")) + list(FIGURE_ROOT.glob("*.png"))
   return [
       {"name": path.name, "url": f"/api/reports/figures/{path.name}"}
-      for path in sorted(FIGURE_ROOT.glob("*.svg"))
+      for path in sorted(figures)
   ]
 
 
@@ -901,11 +902,12 @@ class Handler(BaseHTTPRequestHandler):
       elif request.path.startswith("/api/reports/figures/"):
         name = Path(unquote(request.path.split("/")[-1])).name
         path = FIGURE_ROOT / name
-        if path.suffix != ".svg" or not path.is_file():
-          raise FileNotFoundError("Unknown paper figure.")
+        if path.suffix not in (".svg", ".png") or not path.is_file():
+          raise FileNotFoundError("Unknown figure format.")
         body = path.read_bytes()
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "image/svg+xml")
+        mime = "image/png" if path.suffix == ".png" else "image/svg+xml"
+        self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

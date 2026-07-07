@@ -27,6 +27,10 @@ algorithm := env_var_or_default("ALGORITHM", "aes-dscp")
 default:
     just --list
 
+# launch the master Tkinter GUI for benchmarking
+gui:
+    GDK_BACKEND=x11 .venv/bin/python3 scripts/research/gui_benchmark_master.py
+
 # run Java unit tests
 test:
     mvn test
