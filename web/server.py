@@ -650,16 +650,16 @@ JOB_LOCK = threading.Lock()
 
 def launch_job(payload: dict) -> dict:
   mode = payload.get("mode")
-  if mode not in {"csv", "stream", "smartphone", "osm", "paper-suite", "hadoop-aes-dscp-test", "full-compare"}:
-    raise ValueError(
-        "Mode must be csv, stream, smartphone, osm, paper-suite, hadoop-aes-dscp-test, or full-compare.")
-  run_id = require_run_id(str(payload.get("runId", "")))
-  if mode in {"csv", "stream"} and (RUN_ROOT / run_id).exists():
-    raise ValueError("A saved run already exists with this ID.")
-  if mode in {"smartphone", "osm"} and (DATASET_MANIFEST_ROOT / f"{run_id}.json").exists():
-    raise ValueError("A generated dataset already exists with this ID.")
-  if mode in {"paper-suite", "hadoop-aes-dscp-test"} and any(RUN_ROOT.glob(f"{run_id}-*")):
-    raise ValueError("A saved paper-setup run already exists with this setup ID.")
+  if mode not in {"single-run", "ablation-suite", "full-evaluation"}:
+    raise ValueError("Mode must be single-run, ablation-suite, or full-evaluation.")
+  
+  run_id = require_run_id(str(payload.get("runId", uuid.uuid4().hex[:8])))
+  payload["runId"] = run_id
+  
+  if any(RUN_ROOT.glob(f"{run_id}*")):
+    run_id = f"{run_id}-{uuid.uuid4().hex[:4]}"
+    payload["runId"] = run_id
+
   with JOB_LOCK:
     if any(job.run_id == run_id and job.status == "running" for job in JOBS.values()):
       raise ValueError("A running job already uses this run ID.")
@@ -668,114 +668,29 @@ def launch_job(payload: dict) -> dict:
   env = os.environ.copy()
   env["RUN_ID"] = run_id
   env["BUILD_IMAGE"] = "1" if payload.get("buildImage", False) else "0"
-  if mode in {"csv", "stream"}:
-    env["ALGORITHM"] = algorithm_id(payload.get("algorithm", "aes-dscp"))
-  if mode == "csv":
-    csv_path = project_file(payload.get("csvPath"), CSV_FIXTURE)
-    if csv_path.suffix.lower() != ".csv" or not csv_path.is_file():
-      raise ValueError("Select an existing CSV file within this project.")
+  if mode == "single-run":
+    csv_path = str(ROOT / "datasets-curated" / payload.get("dataset", "smartphone-paper.csv"))
+    algo = payload.get("algorithm", "baseline")
+    engine = payload.get("engine", "apache-spark")
     env.update({
-        "CSV_PATH": str(csv_path),
-        "K": positive_int(payload.get("k", 2), "k"),
-        "PARTITIONS": positive_int(payload.get("partitions", 2), "partitions"),
-        "SEED": integer(payload.get("seed", 42), "seed"),
-        "SYNOPSIS_BINS": positive_int(payload.get("synopsisBins", 4), "synopsisBins"),
-    })
-    command = [str(ROOT / "scripts" / "research" / "run_csv_benchmark.sh")]
-  elif mode == "stream":
-    objects = positive_int(payload.get("objects", 12), "objects")
-    queries = positive_int(payload.get("queries", 2), "queries")
-    env.update({
-        "OBJECTS": objects,
-        "QUERIES": queries,
-        "DIMENSIONS": positive_int(payload.get("dimensions", 2), "dimensions"),
-        "K": positive_int(payload.get("k", 2), "k"),
-        "PARTITIONS": positive_int(payload.get("partitions", 2), "partitions"),
-        "RATE_PER_SECOND": positive_int(payload.get("ratePerSecond", 100), "ratePerSecond"),
-        "EXPECTED_MESSAGES": str(int(objects) * int(queries)),
-        "E2E_REPORT_DIR": str(JOB_ROOT / job_id / "e2e"),
-    })
-    command = [str(ROOT / "tests" / "e2e" / "test_mqtt_kafka_spark.sh")]
-  elif mode == "hadoop-aes-dscp-test":
-    csv_path = project_file(payload.get("csvPath"), CSV_FIXTURE)
-    if csv_path.suffix.lower() != ".csv" or not csv_path.is_file():
-      raise ValueError("Select an existing CSV file within this project.")
-    env.update({
-        "SUITE_ID": run_id,
-        "CSV_PATH": str(csv_path),
-        "K": positive_int(payload.get("k", 2), "k"),
-        "PARTITIONS": positive_int(payload.get("partitions", 2), "partitions"),
-        "VALIDATE_EXACT": "true",
-        "TRACE_LIMIT": positive_int(payload.get("traceLimit", 10), "traceLimit"),
-    })
-    command = [str(ROOT / "tests" / "integration" / "test_hadoop_aes_dscp_comparison.sh")]
-  elif mode in {"smartphone", "osm"}:
-    output = DATASET_ROOT / f"{run_id}.csv"
-    manifest = DATASET_MANIFEST_ROOT / f"{run_id}.json"
-    instances_min = positive_int(payload.get("instancesMin", 5), "instancesMin")
-    instances_max = positive_int(payload.get("instancesMax", 11), "instancesMax")
-    if int(instances_min) > int(instances_max):
-      raise ValueError("instancesMin must not exceed instancesMax.")
-    common = [
-        "--output", str(output),
-        "--manifest", str(manifest),
-        "--objects", positive_int(payload.get("objects", 100), "objects"),
-        "--instances-min", instances_min,
-        "--instances-max", instances_max,
-        "--queries", positive_int(payload.get("queries", 1), "queries"),
-        "--partitions", positive_int(payload.get("partitions", 8), "partitions"),
-        "--seed", integer(payload.get("seed", 42), "seed"),
-    ]
-    script = str(ROOT / "scripts" / "research" / "build_paper_dataset.py")
-    command = (
-        [sys.executable, script, "smartphone", *common] if mode == "smartphone"
-        else ["uv", "run", "--with", "pyproj", script, "osm", *common])
-  elif mode == "full-compare":
-    profile = str(payload.get("profile", "smartphone")).lower()
-    if profile not in {"smartphone", "road-smoke", "road-full", "road-full-20q"}:
-      raise ValueError("profile must be smartphone, road-smoke, road-full or road-full-20q.")
-    allow_full_road = payload.get("allowFullRoad") in {True, "on", "true"}
-    if profile in {"road-full", "road-full-20q"} and not allow_full_road:
-      raise ValueError("Confirm full OSM execution before launching the 98,451-object profile.")
-    driver_memory = str(payload.get("sparkDriverMemory", "8g")).lower()
-    if not re.fullmatch(r"[1-9][0-9]*[gm]", driver_memory):
-      raise ValueError("sparkDriverMemory must be a positive size such as 4g or 8192m.")
-    env.update({
-        "PROFILE": profile,
-        "SUITE_ID": run_id,
+        "ALGORITHM": algo,
+        "CSV_PATH": csv_path,
         "K": positive_int(payload.get("k", 10), "k"),
         "PARTITIONS": positive_int(payload.get("partitions", 8), "partitions"),
-        "SPARK_DRIVER_MEMORY": driver_memory,
         "VALIDATE_EXACT": "true" if payload.get("validateExact") in {True, "on", "true"} else "false",
-        "ALLOW_FULL_ROAD": "true" if allow_full_road else "false",
-        "RUN_HADOOP": "true" if payload.get("runHadoop") in {True, "on", "true"} else "false",
-        "RUN_SPARK": "true" if payload.get("runSpark") in {True, "on", "true"} else "false",
     })
+    if engine == "apache-spark":
+      command = [str(ROOT / "scripts" / "research" / ("run_improved_csv_benchmark.sh" if algo.startswith("improved-") else "run_csv_benchmark.sh"))]
+    else:
+      command = [str(ROOT / "scripts" / "research" / "run_hadoop_csv_benchmark.sh")]
+  elif mode == "ablation-suite":
+    env.update({"PROFILE": payload.get("profile", "road-smoke")})
+    command = [str(ROOT / "scripts" / "research" / "run_ablation_suite.sh")]
+  elif mode == "full-evaluation":
+    env.update({"PROFILE": payload.get("profile", "road-smoke")})
     command = [str(ROOT / "scripts" / "research" / "run_full_comparison_suite.sh")]
   else:
-    setup = str(payload.get("setup", "paired")).lower()
-    if setup not in {"rai-baseline", "iccit-upgrade", "paired", "ablation"}:
-      raise ValueError("setup must be rai-baseline, iccit-upgrade, paired or ablation.")
-    profile = str(payload.get("profile", "smartphone")).lower()
-    if profile not in {"smartphone", "road-smoke", "road-full", "road-full-20q"}:
-      raise ValueError("profile must be smartphone, road-smoke, road-full or road-full-20q.")
-    allow_full_road = payload.get("allowFullRoad") in {True, "on", "true"}
-    if profile in {"road-full", "road-full-20q"} and not allow_full_road:
-      raise ValueError("Confirm full OSM execution before launching the 98,451-object profile.")
-    driver_memory = str(payload.get("sparkDriverMemory", "8g")).lower()
-    if not re.fullmatch(r"[1-9][0-9]*[gm]", driver_memory):
-      raise ValueError("sparkDriverMemory must be a positive size such as 4g or 8192m.")
-    env.update({
-        "SETUP": setup,
-        "PROFILE": profile,
-        "SUITE_ID": run_id,
-        "K": positive_int(payload.get("k", 10), "k"),
-        "PARTITIONS": positive_int(payload.get("partitions", 8), "partitions"),
-        "SPARK_DRIVER_MEMORY": driver_memory,
-        "VALIDATE_EXACT": "true" if payload.get("validateExact") in {True, "on", "true"} else "false",
-        "ALLOW_FULL_ROAD": "true" if allow_full_road else "false",
-    })
-    command = [str(ROOT / "scripts" / "research" / "run_paper_setup.sh")]
+    raise ValueError(f"Unknown mode {mode}. Please use single-run, ablation-suite, or full-evaluation.")
   log_path = JOB_ROOT / f"{job_id}.log"
   job = Job(job_id, run_id, mode, "running", command, utc_now(), log_path)
   log = log_path.open("w")
@@ -946,6 +861,32 @@ class Handler(BaseHTTPRequestHandler):
       self.send_error_json(exc)
     except OSError as exc:
       self.send_error_json(f"Could not launch benchmark: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+  def do_DELETE(self):
+    try:
+      if not self.path.startswith("/api/jobs/"):
+        self.send_error_json("Unknown endpoint.", HTTPStatus.NOT_FOUND)
+        return
+      
+      from urllib.parse import unquote
+      job_id = unquote(self.path.split("/")[3])
+      
+      with JOB_LOCK:
+        job = JOBS.get(job_id)
+      
+      if not job:
+        self.send_error_json("Job not found.", HTTPStatus.NOT_FOUND)
+        return
+        
+      if job.status != "running" or not job.process:
+        self.send_error_json("Job is not running.", HTTPStatus.BAD_REQUEST)
+        return
+        
+      job.process.terminate()
+      self.send_json({"message": "Job terminated successfully."})
+      
+    except Exception as exc:
+      self.send_error_json(f"Error terminating job: {exc}", HTTPStatus.INTERNAL_SERVER_ERROR)
 
   def serve_static(self, request_path: str):
     relative = "index.html" if request_path in {"", "/"} else request_path.lstrip("/")

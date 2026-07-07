@@ -25,8 +25,15 @@ def main():
 
     for engine in engines:
         for algo in algorithms:
+            # Full suite format: SUITE_ID-engine-algo
+            # Ablation suite format: SUITE_ID-algo (only runs spark)
             run_id = f"{suite_id}-{engine}-{algo}"
             metrics_path = root / run_id / "metrics.json"
+            
+            if not metrics_path.exists() and engine == "spark":
+                run_id = f"{suite_id}-{algo}"
+                metrics_path = root / run_id / "metrics.json"
+
             if metrics_path.exists():
                 with open(metrics_path, 'r') as f:
                     metrics = json.load(f)

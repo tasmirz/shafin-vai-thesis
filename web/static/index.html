@@ -17,6 +17,7 @@
       </div>
       <nav id="navigation" aria-label="Research modules">
         <button class="nav-link active" data-view="dashboard">Dashboard</button>
+        <button class="nav-link" data-view="launcher">Launcher</button>
         <button class="nav-link" data-view="runs">Runs &amp; Compare</button>
         <button class="nav-link" data-view="visualizations">Visualizations</button>
       </nav>
@@ -61,6 +62,89 @@
           </div>
           <div id="recent-runs"></div>
         </section>
+      </section>
+
+      <section class="view" id="launcher-view">
+        <div class="section-intro">
+          <p class="eyebrow">Execution control</p>
+          <h3>Launch reproducible benchmark profiles</h3>
+          <p>Each successful launch writes an immutable saved run with metrics, validation evidence, and plots.</p>
+        </div>
+        
+        <div class="panel" id="active-jobs-panel" style="display: none; margin-bottom: 2rem; border-left: 4px solid var(--accent);">
+          <div class="section-head">
+            <h3>Active Background Jobs</h3>
+          </div>
+          <div id="active-jobs-list"></div>
+        </div>
+
+        <div class="two-column">
+          <form class="panel form-card" id="single-run-form">
+            <div class="badge">Single Run</div>
+            <h3>Test one configuration</h3>
+            <label>Engine
+              <select name="engine">
+                <option value="apache-spark">Apache Spark</option>
+                <option value="hadoop">Hadoop MapReduce</option>
+              </select>
+            </label>
+            <label>Algorithm
+              <select name="algorithm">
+                <option value="baseline">Baseline (Rai-Lian)</option>
+                <option value="dscp-only">DSCP-only</option>
+                <option value="aes-only">AES-only</option>
+                <option value="aes-dscp">AES + DSCP</option>
+                <option value="improved-baseline">Improved Baseline</option>
+                <option value="improved-dscp-only">Improved DSCP-only</option>
+                <option value="improved-aes-only">Improved AES-only</option>
+                <option value="improved-aes-dscp">Improved AES+DSCP</option>
+              </select>
+            </label>
+            <label>Dataset Profile
+              <select name="dataset">
+                <option value="smartphone-paper.csv">Synthetic Smartphone</option>
+                <option value="bangladesh-road-smoke.csv">Bangladesh Road (Smoke)</option>
+                <option value="bangladesh-road-paper.csv">Bangladesh Road (Full)</option>
+              </select>
+            </label>
+            <div class="field-pair">
+              <label>K<input type="number" name="k" value="10"></label>
+              <label>Partitions<input type="number" name="partitions" value="8"></label>
+            </div>
+            <label class="check"><input type="checkbox" name="validateExact" checked> Validate Exact (Oracle)</label>
+            <button class="button primary" type="submit">Launch Single Run</button>
+          </form>
+
+          <form class="panel form-card" id="ablation-suite-form">
+            <div class="badge teal">Dataset Ablation</div>
+            <h3>Compare algorithms on one dataset</h3>
+            <p class="subtle">Runs all Spark algorithms automatically.</p>
+            <label>Dataset Profile
+              <select name="profile">
+                <option value="smartphone">Synthetic Smartphone</option>
+                <option value="road-smoke" selected>Bangladesh Road (Smoke)</option>
+                <option value="road-full">Bangladesh Road (Full)</option>
+                <option value="road-full-20q">Bangladesh Road (Full, 20 queries)</option>
+              </select>
+            </label>
+            <button class="button primary" type="submit">Launch Ablation Suite</button>
+          </form>
+
+          <form class="panel form-card" id="full-evaluation-form">
+            <div class="badge teal">Full Evaluation</div>
+            <h3>Cross-engine algorithm comparison</h3>
+            <p class="subtle">Runs Spark and Hadoop across all configurations.</p>
+            <label>Dataset Profile
+              <select name="profile">
+                <option value="smartphone">Synthetic Smartphone</option>
+                <option value="road-smoke" selected>Bangladesh Road (Smoke)</option>
+                <option value="road-full">Bangladesh Road (Full)</option>
+                <option value="road-full-20q">Bangladesh Road (Full, 20 queries)</option>
+              </select>
+            </label>
+            <button class="button primary" type="submit">Launch Full Suite</button>
+          </form>
+        </div>
       </section>
 
       <section class="view" id="runs-view">

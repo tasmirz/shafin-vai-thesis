@@ -46,6 +46,11 @@ class BenchmarkGUI(tk.Tk):
         notebook.add(tab3, text="Full Evaluation")
         self.build_full_eval_tab(tab3)
 
+        # Tab 4: Visualizations
+        tab4 = ttk.Frame(notebook)
+        notebook.add(tab4, text="Visualizations")
+        self.build_visualizations_tab(tab4)
+
         # Common Output Area
         output_frame = ttk.LabelFrame(self, text="Console Output")
         output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -110,12 +115,71 @@ class BenchmarkGUI(tk.Tk):
 
         ttk.Button(frame, text="Run Full Comparison Suite (Spark & Hadoop)", command=self.run_full).grid(row=1, column=0, columnspan=2, pady=15)
 
+    def build_visualizations_tab(self, parent):
+        frame = ttk.Frame(parent, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        top_frame = ttk.Frame(frame)
+        top_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(top_frame, text="Refresh Plots", command=self.refresh_plots).pack(side=tk.LEFT, padx=5)
+        
+        self.plot_combo = ttk.Combobox(top_frame, state="readonly", width=50)
+        self.plot_combo.pack(side=tk.LEFT, padx=5)
+        self.plot_combo.bind("<<ComboboxSelected>>", self.load_plot)
+        
+        self.canvas = tk.Canvas(frame, bg="white")
+        scroll_y = ttk.Scrollbar(frame, orient="vertical", command=self.canvas.yview)
+        scroll_x = ttk.Scrollbar(frame, orient="horizontal", command=self.canvas.xview)
+        self.canvas.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.img_container = self.canvas.create_image(0, 0, anchor=tk.NW)
+        self.current_img = None
+        
+        self.refresh_plots()
+
+    def refresh_plots(self):
+        fig_dir = self.root_dir / "reports" / "figures"
+        plots = []
+        if fig_dir.exists():
+            for f in sorted(fig_dir.glob("*.png"), key=os.path.getmtime, reverse=True):
+                plots.append(f.name)
+        
+        if plots:
+            self.plot_combo["values"] = plots
+            self.plot_combo.current(0)
+            self.load_plot()
+        else:
+            self.plot_combo["values"] = ["No plots found"]
+            self.plot_combo.current(0)
+
+    def load_plot(self, event=None):
+        filename = self.plot_combo.get()
+        if filename == "No plots found": return
+        
+        path = self.root_dir / "reports" / "figures" / filename
+        if path.exists():
+            try:
+                self.current_img = tk.PhotoImage(file=str(path))
+                # Optional: subsample to fit better if very large, but scrollbars handle it
+                # self.current_img = self.current_img.subsample(2, 2)
+                self.canvas.itemconfig(self.img_container, image=self.current_img)
+                self.canvas.configure(scrollregion=self.canvas.bbox(tk.ALL))
+            except Exception as e:
+                self.log(f"Failed to load image: {e}")
+
     def log(self, text):
-        self.output_text.config(state=tk.NORMAL)
-        self.output_text.insert(tk.END, text + "\n")
-        self.output_text.see(tk.END)
-        self.output_text.config(state=tk.DISABLED)
-        self.update_idletasks()
+        def _update():
+            self.output_text.config(state=tk.NORMAL)
+            self.output_text.insert(tk.END, text + "\n")
+            self.output_text.see(tk.END)
+            self.output_text.config(state=tk.DISABLED)
+            self.update_idletasks()
+        self.after(0, _update)
 
     def run_subprocess(self, cmd, env=None):
         self.log(f"> Running command: {' '.join(cmd)}")
@@ -132,6 +196,8 @@ class BenchmarkGUI(tk.Tk):
             process.stdout.close()
             process.wait()
             self.log(f"> Command finished with code {process.returncode}")
+            # Refresh plots on the main thread after execution finishes
+            self.after(0, self.refresh_plots)
 
         threading.Thread(target=target, daemon=True).start()
 

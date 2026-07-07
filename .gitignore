@@ -72,3 +72,6 @@ reports/runs/*
 reports/web-jobs/*
 !reports/web-jobs/.gitkeep
 reports/e2e/test-runs/
+
+
+reports/figures/**

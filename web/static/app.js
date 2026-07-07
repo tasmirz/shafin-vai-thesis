@@ -82,9 +82,12 @@ function runTable(runs, selection = false) {
   if (!runs.length) return '<div class="empty-state">No saved run artifacts have been generated yet.</div>';
   return `<div class="scroll-table"><table class="table"><thead><tr>
     ${selection ? "<th>Select</th>" : ""}
-    <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Filtered</th><th>Validation</th>
+    <th>Run ID</th><th>Variant</th><th>Input</th><th>Algorithm time</th><th>Filtered</th><th>Validation</th>${selection ? "<th>Actions</th>" : ""}
   </tr></thead><tbody>${runs.map(run => {
     const validation = validationDisplay(run.summary.exactAgreement);
+    let suiteId = run.id.replace(/-(spark|hadoop)?-?(improved-)?(baseline|dscp-only|aes-only|aes-dscp)$/, '');
+    if (suiteId.endsWith('-')) suiteId = suiteId.slice(0, -1);
+    
     return `<tr>
     ${selection ? `<td><input class="compare-check" type="checkbox" value="${escapeHtml(run.id)}"></td>` : ""}
     <td><button class="run-link" data-run="${escapeHtml(run.id)}">${escapeHtml(run.id)}</button></td>
@@ -93,6 +96,7 @@ function runTable(runs, selection = false) {
     <td>${formatMs(run.summary.algorithmElapsedMs)}</td>
     <td>${pruningDisplay(run.summary.algorithm, run.summary.avgPruneRatio)}</td>
     <td><span class="status-pill${validation[1]}">${validation[0]}</span></td>
+    ${selection ? `<td><button class="button compact compare-suite-btn" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;" data-suite="${escapeHtml(suiteId)}">Compare Suite</button></td>` : ""}
   </tr>`;
   }).join("")}</tbody></table></div>`;
 }
@@ -183,6 +187,17 @@ function bindRunLinks() {
       }
     };
   });
+
+  document.querySelectorAll(".compare-suite-btn").forEach(button => {
+    button.onclick = () => {
+      const suiteId = button.dataset.suite;
+      document.querySelectorAll(".compare-check").forEach(cb => {
+        cb.checked = cb.value.startsWith(suiteId);
+      });
+      const compareBtn = document.getElementById("compare-selected");
+      if (compareBtn) compareBtn.click();
+    };
+  });
 }
 
 document.getElementById("close-drawer")?.addEventListener("click", () => {
@@ -210,6 +225,50 @@ document.getElementById("compare-selected")?.addEventListener("click", async () 
     let noticeHtml = report.fair ? 
       `<div class="callout success">${escapeHtml(report.notice)}</div>` : 
       `<div class="callout warning">${escapeHtml(report.notice)}<br><small>Differing fields: ${report.differences.map(d => escapeHtml(d.label)).join(', ')}</small></div>`;
+
+    // Generate dynamic HTML bar charts based exactly on selected runs
+    const maxTime = Math.max(...report.runs.map(r => r.algorithmElapsedMs || 0));
+    const maxEmissions = Math.max(...report.runs.map(r => r.totalEmittedRecords || 0));
+    const maxPruning = Math.max(...report.runs.map(r => r.avgPruneRatio || 0));
+
+    function makeChart(title, maxVal, valueFn, formatFn, color) {
+      if (maxVal === 0) return '';
+      return `
+        <div class="panel" style="margin-top: 1rem; padding: 1.5rem; background: var(--bg-surface);">
+          <h4 style="margin-bottom: 1rem; color: var(--fg);">${title}</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            ${report.runs.map(run => {
+              const val = valueFn(run);
+              const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+              return `
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                  <div style="width: 150px; font-size: 0.85rem; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(run.id)}">
+                    ${escapeHtml(run.algorithm)} <small class="subtle">(${escapeHtml(run.source)})</small>
+                  </div>
+                  <div style="flex-grow: 1; background: var(--bg); border-radius: 4px; height: 1.5rem; overflow: hidden;">
+                    <div style="width: ${pct}%; height: 100%; background: ${color}; transition: width 0.3s;"></div>
+                  </div>
+                  <div style="width: 80px; font-size: 0.85rem; font-weight: 500;">
+                    ${formatFn(val)}
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    const plotsHtml = `
+      <div class="section-head" style="margin-top: 2rem;">
+        <h3>Dynamic Comparison Analytics</h3>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        ${makeChart('Algorithm Execution Time', maxTime, r => r.algorithmElapsedMs || 0, val => formatMs(val), 'var(--accent)')}
+        ${makeChart('Candidate Pruning Ratio', maxPruning, r => r.avgPruneRatio || 0, val => percent(val), '#4f46e5')}
+        ${makeChart('Total Emitted Records', maxEmissions, r => r.totalEmittedRecords || 0, val => Number(val).toLocaleString(), '#e11d48')}
+      </div>
+    `;
 
     panel.innerHTML = `
       <div class="section-head">
@@ -240,12 +299,97 @@ document.getElementById("compare-selected")?.addEventListener("click", async () 
           </tbody>
         </table>
       </div>
+      ${plotsHtml}
     `;
     panel.scrollIntoView({ behavior: "smooth" });
   } catch (error) {
     toast(error.message, true);
   }
 });
+
+// Launcher Forms
+function handleLaunch(formId, mode) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    const payload = { mode };
+    for (const [key, value] of formData.entries()) {
+      payload[key] = value === "on" ? true : value;
+    }
+    // Handle checkboxes that are unchecked (FormData excludes them)
+    form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      if (!cb.checked) payload[cb.name] = false;
+    });
+
+    try {
+      await api("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      toast(`Successfully launched ${mode} job in the background.`);
+      form.reset();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+}
+
+handleLaunch("single-run-form", "single-run");
+handleLaunch("ablation-suite-form", "ablation-suite");
+handleLaunch("full-evaluation-form", "full-evaluation");
+
+// Jobs Polling
+async function renderJobs() {
+  try {
+    const data = await api("/api/jobs");
+    const activeJobs = data.jobs.filter(j => j.status === "running");
+    
+    const panel = document.getElementById("active-jobs-panel");
+    const list = document.getElementById("active-jobs-list");
+    
+    if (activeJobs.length > 0) {
+      if (panel) panel.style.display = "block";
+      if (list) {
+        list.innerHTML = activeJobs.map(job => `
+          <div style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong>${escapeHtml(job.mode)}</strong>
+              <div>
+                <span class="badge teal pulse" style="margin-right: 0.5rem;">Running</span>
+                <button class="button" style="padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="stopJob('${escapeHtml(job.jobId)}')">Stop</button>
+              </div>
+            </div>
+            <p class="subtle" style="margin-top: 0.5rem; margin-bottom: 1rem; font-family: monospace;">Suite ID: ${escapeHtml(job.runId)}</p>
+            <div style="background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap;" class="job-log-container">${escapeHtml(job.log || "Waiting for output...")}</div>
+          </div>
+        `).join("");
+        
+        // Auto-scroll to bottom of logs
+        document.querySelectorAll('.job-log-container').forEach(el => el.scrollTop = el.scrollHeight);
+      }
+    } else {
+      if (panel) panel.style.display = "none";
+    }
+  } catch (error) {
+    console.error("Failed to fetch jobs:", error);
+  } finally {
+    setTimeout(renderJobs, 3000);
+  }
+}
+
+window.stopJob = async function(jobId) {
+  if (!confirm("Are you sure you want to stop this running job?")) return;
+  try {
+    await api(`/api/jobs/${jobId}`, { method: "DELETE" });
+    toast("Job stopped successfully.");
+    renderJobs(); // Immediate refresh
+  } catch (error) {
+    toast(`Failed to stop job: ${error.message}`, true);
+  }
+};
 
 // Navigation
 document.addEventListener("click", event => {
@@ -261,3 +405,4 @@ if (refreshBtn) refreshBtn.onclick = refreshAll;
 
 // Init
 refreshAll();
+renderJobs();
