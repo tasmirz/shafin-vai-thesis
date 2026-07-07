@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE_ID="${SUITE_ID:-full-comparison-$(date -u +%Y%m%dT%H%M%SZ)}"
-PROFILE="${PROFILE:-smartphone}"
+PROFILE="${PROFILE:-road-smoke}"
 BUILD_IMAGE="${BUILD_IMAGE:-1}"
 K="${K:-10}"
 PARTITIONS="${PARTITIONS:-8}"
@@ -98,6 +98,7 @@ if [[ -n "${QUERY_SET_PATH:-}" ]]; then
 fi
 
 VARIANTS=(baseline dscp-only aes-only aes-dscp)
+SPARK_VARIANTS=(baseline dscp-only aes-only aes-dscp improved-baseline improved-dscp-only improved-aes-only improved-aes-dscp)
 HADOOP_RUNS=()
 SPARK_RUNS=()
 ALL_RUNS=()
@@ -129,6 +130,10 @@ run_spark_variant() {
     return
   fi
   echo "== Running Spark PTD: $variant =="
+  local script="scripts/research/run_csv_benchmark.sh"
+  if [[ "$variant" == improved-* ]]; then
+    script="scripts/research/run_improved_csv_benchmark.sh"
+  fi
   RUN_ID="$run_id" ALGORITHM="$variant" CSV_PATH="$CSV_PATH" \
     DATASET_MANIFEST="$DATASET_MANIFEST" \
     QUERY_SET_PATH="${QUERY_SET_PATH:-}" QUERY_SET_MANIFEST="${QUERY_SET_MANIFEST:-}" \
@@ -136,7 +141,7 @@ run_spark_variant() {
     RUN_LOCAL_ORACLE="$VALIDATE_EXACT" BUILD_IMAGE="$build" \
     SPARK_DRIVER_MEMORY="$SPARK_DRIVER_MEMORY" SPARK_MASTER="$SPARK_MASTER" \
     TRACE_LIMIT="$TRACE_LIMIT" \
-    scripts/research/run_csv_benchmark.sh
+    "$script"
 }
 
 echo "========================================================================"
@@ -162,7 +167,7 @@ if [[ "$RUN_SPARK" == "true" ]]; then
   echo ""
   echo "=== Phase 2: Apache Spark variants ==="
   sbuild="$BUILD_IMAGE"
-  for variant in "${VARIANTS[@]}"; do
+  for variant in "${SPARK_VARIANTS[@]}"; do
     run_spark_variant "$sbuild" "$variant"
     sbuild=0
   done
@@ -202,7 +207,7 @@ run_spark = run_spark.lower() in ("1", "true")
 validated_flag = validated.lower() in ("1", "true")
 
 root = Path("reports/runs")
-variants = ("baseline", "dscp-only", "aes-only", "aes-dscp")
+variants = ("baseline", "dscp-only", "aes-only", "aes-dscp", "improved-baseline", "improved-dscp-only", "improved-aes-only", "improved-aes-dscp")
 engines = []
 if run_hadoop:
   engines.append("hadoop")
@@ -236,15 +241,18 @@ for engine in engines:
     elapsed = spark.get("algorithmElapsedMs")
     prune = spark.get("avgPruneRatio")
     prune_text = f"{prune*100:.2f}%" if prune is not None else "n/a"
-    emitted = safe(spark.get("totalEmittedRecords"))
+    emitted_val = spark.get("totalEmittedRecords")
+    emitted_text = f"{emitted_val:,}" if emitted_val is not None else "n/a"
     aer = safe(spark.get("avgAER"))
     exact = val.get("exactTopKAgreement")
     exact_text = "not run" if exact is None else str(exact)
     false_prunes = safe(spark.get("falsePruneCount"))
-    shuffle = safe(spark.get("totalShuffleBytes"))
+    shuffle_val = spark.get("totalShuffleBytes")
+    shuffle_text = f"{shuffle_val:,}" if shuffle_val is not None else "n/a"
+    elapsed_text = f"{elapsed:,} ms" if elapsed is not None else "n/a"
     rows.append(
-        f"| {engine} | {variant} | {elapsed:,} ms | {prune_text} | {emitted:,} | "
-        f"{aer} | {shuffle:,} | {exact_text} |")
+        f"| {engine} | {variant} | {elapsed_text} | {prune_text} | {emitted_text} | "
+        f"{aer} | {shuffle_text} | {exact_text} |")
     if engine == "hadoop":
       hadoop_data[variant] = metrics
     else:
@@ -264,15 +272,12 @@ for e in engines:
 engine_header = engine_header.rstrip(" |")
 
 has_both = "hadoop" in hadoop_data and "spark" in spark_data
-if has_both:
-  h_base = hadoop_data["baseline"]["spark"]["algorithmElapsedMs"]
-  h_full = hadoop_data["aes-dscp"]["spark"]["algorithmElapsedMs"]
-  s_base = spark_data["baseline"]["spark"]["algorithmElapsedMs"]
-  s_full = spark_data["aes-dscp"]["spark"]["algorithmElapsedMs"]
-  h_reduction = ((h_base - h_full) / h_base * 100) if h_base else 0
-  s_reduction = ((s_base - s_full) / s_base * 100) if s_base else 0
-else:
-  h_base = s_base = h_full = s_full = h_reduction = s_reduction = None
+h_base = hadoop_data.get("baseline", {}).get("spark", {}).get("algorithmElapsedMs") if "hadoop" in hadoop_data else None
+h_full = hadoop_data.get("aes-dscp", {}).get("spark", {}).get("algorithmElapsedMs") if "hadoop" in hadoop_data else None
+s_base = spark_data.get("baseline", {}).get("spark", {}).get("algorithmElapsedMs") if "spark" in spark_data else None
+s_full = spark_data.get("aes-dscp", {}).get("spark", {}).get("algorithmElapsedMs") if "spark" in spark_data else None
+h_reduction = ((h_base - h_full) / h_base * 100) if h_base and h_full else 0
+s_reduction = ((s_base - s_full) / s_base * 100) if s_base and s_full else 0
 
 report = f"""# Full Comparison Suite: `{suite}`
 
@@ -318,14 +323,21 @@ These reference values are from the ICCIT 2025 paper. Hardware and runtime condi
 | Engine | Baseline (ms) | AES-only (ms) | DSCP-only (ms) | AES+DSCP (ms) | Reduction (AES+DSCP vs Baseline) |
 |---|---|---|---|---|---|---|
 """
-if "hadoop" in hadoop_data:
+if "hadoop" in hadoop_data and "baseline" in hadoop_data:
   h_aes = hadoop_data["aes-only"]["spark"]["algorithmElapsedMs"]
   h_dscp = hadoop_data["dscp-only"]["spark"]["algorithmElapsedMs"]
   report += f"| hadoop (MapReduce) | {h_base:,} | {h_aes:,} | {h_dscp:,} | {h_full:,} | {h_reduction:.2f}% |\n"
-if "spark" in spark_data:
+if "spark" in spark_data and "baseline" in spark_data:
   s_aes = spark_data["aes-only"]["spark"]["algorithmElapsedMs"]
   s_dscp = spark_data["dscp-only"]["spark"]["algorithmElapsedMs"]
   report += f"| spark | {s_base:,} | {s_aes:,} | {s_dscp:,} | {s_full:,} | {s_reduction:.2f}% |\n"
+if "spark" in spark_data and "improved-baseline" in spark_data:
+  s_imp_base = spark_data["improved-baseline"]["spark"]["algorithmElapsedMs"]
+  s_imp_aes = spark_data["improved-aes-only"]["spark"]["algorithmElapsedMs"]
+  s_imp_dscp = spark_data["improved-dscp-only"]["spark"]["algorithmElapsedMs"]
+  s_imp_full = spark_data["improved-aes-dscp"]["spark"]["algorithmElapsedMs"]
+  s_imp_reduction = ((s_imp_base - s_imp_full) / s_imp_base * 100) if s_imp_base else 0
+  report += f"| spark (HGTP) | {s_imp_base:,} | {s_imp_aes:,} | {s_imp_dscp:,} | {s_imp_full:,} | {s_imp_reduction:.2f}% |\n"
 
 report += f"""
 ## Interpretation

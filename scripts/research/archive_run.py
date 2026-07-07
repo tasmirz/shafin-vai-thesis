@@ -54,7 +54,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
   metric_log = re.sub(
       r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} WARN [^\n]*(?:\n|$)", "", spark_log)
   # The engine line begins with a key rather than a marker.
-  engine_match = re.search(r"^engine=(apache-(?:spark|hadoop)) (.+)$", metric_log, re.MULTILINE)
+  engine_match = re.search(r"^engine=(improved-apache-spark|apache-(?:spark|hadoop)) (.+)$", metric_log, re.MULTILINE)
   engine = dict(re.findall(r"(\w+)=([^\s]+)", engine_match.group(2))) if engine_match else {}
   execution_engine = engine_match.group(1) if engine_match else "unknown"
   count_match = re.search(r"^rawEvents=(\d+) probabilisticInstances=(\d+)", metric_log, re.MULTILINE)
@@ -73,7 +73,7 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
     ]
   else:
     result_lines = re.findall(
-        r"^TopKResult\{engine=apache-spark, (.+?)\}$", metric_log, re.MULTILINE)
+        r"^TopKResult\{engine=(?:improved-)?apache-spark, (.+?)\}$", metric_log, re.MULTILINE)
     rows = [
         dict(re.findall(r"(\w+)=([^,}]+)", line))
         for line in result_lines

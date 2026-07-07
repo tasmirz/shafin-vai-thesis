@@ -9,6 +9,7 @@ import java.util.Map;
 /** Registry of named treatments used in reproducible ablation runs. */
 public final class PtdAlgorithmRegistry {
   public static final String DEFAULT_ID = "aes-dscp";
+  public static final String IMPROVED_DEFAULT_ID = "improved-aes-dscp";
 
   private static final Map<String, PtdAlgorithm> ALGORITHMS = createAlgorithms();
 
@@ -64,6 +65,30 @@ public final class PtdAlgorithmRegistry {
         true,
         true,
         "Full named method: candidate pruning plus aggregated emission."));
+    register(algorithms, new ConfiguredAlgorithm(
+        "improved-baseline",
+        "HGTP Baseline",
+        false,
+        false,
+        "HGTP framework (skyline pre-filter + global threshold + sorted processing) without AES or DSCP."));
+    register(algorithms, new ConfiguredAlgorithm(
+        "improved-dscp-only",
+        "HGTP DSCP-only",
+        true,
+        false,
+        "HGTP framework with DSCP candidate pruning; baseline emissions."));
+    register(algorithms, new ConfiguredAlgorithm(
+        "improved-aes-only",
+        "HGTP AES-only",
+        false,
+        true,
+        "HGTP framework with aggregated emissions; no candidate pruning."));
+    register(algorithms, new ConfiguredAlgorithm(
+        IMPROVED_DEFAULT_ID,
+        "HGTP AES + DSCP",
+        true,
+        true,
+        "Full HGTP method: skyline + global threshold + sorted processing + AES + DSCP."));
     return Collections.unmodifiableMap(algorithms);
   }
 
@@ -78,6 +103,11 @@ public final class PtdAlgorithmRegistry {
           "aes+dhcp", "aes_dhcp", "aesdhcp" -> DEFAULT_ID;
       case "dscp", "dscp_only", "dhcp", "dhcp-only", "dhcp_only" -> "dscp-only";
       case "aes", "aes_only" -> "aes-only";
+      case "improved", "improved_aes_dscp", "improved-full",
+          "hgtp", "hgtp-aes-dscp" -> IMPROVED_DEFAULT_ID;
+      case "improved_baseline", "hgtp-baseline" -> "improved-baseline";
+      case "improved_dscp_only", "improved-dscp", "hgtp-dscp-only" -> "improved-dscp-only";
+      case "improved_aes_only", "improved-aes", "hgtp-aes-only" -> "improved-aes-only";
       default -> id;
     };
   }

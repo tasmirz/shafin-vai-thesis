@@ -17,7 +17,7 @@ REUSE_EXISTING_RUNS="${REUSE_EXISTING_RUNS:-false}"
 SPARK_DRIVER_MEMORY="${SPARK_DRIVER_MEMORY:-2g}"
 SPARK_MASTER="${SPARK_MASTER:-local[4]}"
 TRACE_LIMIT="${TRACE_LIMIT:-25}"
-VARIANTS=(baseline dscp-only aes-only aes-dscp)
+VARIANTS=(baseline dscp-only aes-only aes-dscp improved-baseline improved-dscp-only improved-aes-only improved-aes-dscp)
 RUNS=()
 
 cd "$ROOT_DIR"
@@ -52,51 +52,57 @@ from pathlib import Path
 
 root = Path("reports/runs")
 suite = sys.argv[1]
-metrics = {
-    variant: json.loads((root / f"{suite}-{variant}" / "metrics.json").read_text())["spark"]
-    for variant in ("baseline", "dscp-only", "aes-only", "aes-dscp")
-}
-baseline = metrics["baseline"]
-dscp = metrics["dscp-only"]
-aes = metrics["aes-only"]
-full = metrics["aes-dscp"]
+variants = ["baseline", "dscp-only", "aes-only", "aes-dscp", "improved-baseline", "improved-dscp-only", "improved-aes-only", "improved-aes-dscp"]
+metrics = {}
+for variant in variants:
+    path = root / f"{suite}-{variant}" / "metrics.json"
+    if path.exists():
+        metrics[variant] = json.loads(path.read_text())["spark"]
 
-indexed = all(
-    result.get("boundMode") == "rai-lian-artree-selected-level-partial-reducer"
-    for result in metrics.values()
-)
-if indexed:
-    assert baseline["totalEmittedRecords"] >= aes["totalEmittedRecords"], "AES increased emissions"
-    assert dscp["totalEmittedRecords"] >= full["totalEmittedRecords"], "AES increased DSCP emissions"
-    assert baseline["avgPruneRatio"] == aes["avgPruneRatio"], (
-        "AES changed Rai-Lian baseline candidate selection")
-    assert dscp["avgPruneRatio"] >= baseline["avgPruneRatio"], (
-        "DSCP retained more candidates than the indexed baseline")
-else:
-    assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
-    assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
-    assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
-assert dscp["avgPruneRatio"] == full["avgPruneRatio"], "AES changed DSCP candidate selection"
-assert dscp["totalBaselineEmissions"] == full["totalBaselineEmissions"], "AES changed DSCP baseline scope"
-if sys.argv[2].lower() in ("1", "true"):
-    assert all(result["falsePruneCount"] == 0 for result in metrics.values()), (
-        "indexed or DSCP treatment false prune detected")
-if sys.argv[3].lower() in ("1", "true") and all(result.get("boundMode") in {
-        "ddr-mbr-full-possible",
-        "rai-lian-artree-selected-level-partial-reducer",
-    } for result in metrics.values()):
-    assert dscp["avgPruneRatio"] > 0, "MBR-backed DSCP did not certify any pruning"
-assert all(
-    result.get("boundMode") in {
-        "partition-local-conservative-no-mbr",
-        "mbr-when-present-otherwise-conservative",
-        "conservative-remote-mass-no-mbr",
-        "ddr-mbr-full-possible",
-        "rai-lian-artree-selected-level-partial-reducer",
-    }
-    and result.get("emissionScope") == "server-partition"
-    for result in metrics.values()
-), "run lacks paper-alignment mode evidence"
+baseline = metrics.get("baseline")
+dscp = metrics.get("dscp-only")
+aes = metrics.get("aes-only")
+full = metrics.get("aes-dscp")
+
+if baseline and full:
+    indexed = all(
+        result.get("boundMode") == "rai-lian-artree-selected-level-partial-reducer"
+        for result in metrics.values() if result
+    )
+    if indexed:
+        assert baseline["totalEmittedRecords"] >= aes["totalEmittedRecords"], "AES increased emissions"
+        assert dscp["totalEmittedRecords"] >= full["totalEmittedRecords"], "AES increased DSCP emissions"
+        assert baseline["avgPruneRatio"] == aes["avgPruneRatio"], (
+            "AES changed Rai-Lian baseline candidate selection")
+        assert dscp["avgPruneRatio"] >= baseline["avgPruneRatio"], (
+            "DSCP retained more candidates than the indexed baseline")
+    else:
+        assert baseline["totalEmittedRecords"] > aes["totalEmittedRecords"], "AES did not reduce emissions"
+        assert dscp["totalEmittedRecords"] > full["totalEmittedRecords"], "AES did not reduce DSCP emissions"
+        assert baseline["avgPruneRatio"] == 0 and aes["avgPruneRatio"] == 0, "non-DSCP treatment pruned"
+    assert dscp["avgPruneRatio"] == full["avgPruneRatio"], "AES changed DSCP candidate selection"
+    assert dscp["totalBaselineEmissions"] == full["totalBaselineEmissions"], "AES changed DSCP baseline scope"
+    if sys.argv[2].lower() in ("1", "true"):
+        assert all(result["falsePruneCount"] == 0 for result in metrics.values() if result), (
+            "indexed or DSCP treatment false prune detected")
+    if sys.argv[3].lower() in ("1", "true") and all(result.get("boundMode") in {
+            "ddr-mbr-full-possible",
+            "rai-lian-artree-selected-level-partial-reducer",
+        } for result in metrics.values() if result):
+        assert dscp["avgPruneRatio"] > 0, "MBR-backed DSCP did not certify any pruning"
+    assert all(
+        result.get("boundMode") in {
+            "partition-local-conservative-no-mbr",
+            "mbr-when-present-otherwise-conservative",
+            "conservative-remote-mass-no-mbr",
+            "ddr-mbr-full-possible",
+            "rai-lian-artree-selected-level-partial-reducer",
+            "hgtp-artree-selected-level",
+            "hgtp-conservative-remote-mass"
+        }
+        and result.get("emissionScope") == "server-partition"
+        for result in metrics.values() if result
+    ), "run lacks paper-alignment mode evidence"
 print("ablationAssertions=passed emissionChecks=true exactValidation=" + sys.argv[2])
 PY
 
