@@ -294,6 +294,74 @@ nav { display: grid; gap: 5px; }
 .toast.open { display: block; }
 .toast.error { background: var(--danger); }
 
+/* Job Console Enhancements */
+.job-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.job-tabs {
+  display: inline-flex;
+  background: #e7efee;
+  padding: 3px;
+  border-radius: 8px;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+.tab-btn:hover {
+  color: var(--ink);
+}
+.tab-btn.active {
+  background: var(--panel);
+  color: var(--teal);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+.console-log {
+  margin-top: 15px !important;
+}
+.empty-log {
+  margin-top: 15px;
+  text-align: center;
+  padding: 20px;
+  background: #f7faf9;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.topk-query-section {
+  margin-top: 15px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+}
+.topk-query-section h4 {
+  margin-bottom: 12px;
+  color: var(--teal);
+  font-size: 14px;
+}
+.object-id-badge {
+  background: var(--bg);
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+}
+.topk-results-table th {
+  padding-bottom: 8px;
+}
+.topk-results-table td {
+  padding: 10px 8px;
+}
+
 @media (max-width: 1120px) {
   .sidebar { width: 74px; padding: 18px 9px; }
   .brand > div:last-child, .runtime, .nav-link { font-size: 0; }

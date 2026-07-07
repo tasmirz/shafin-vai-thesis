@@ -1,0 +1,4 @@
+query_id,rank,object_id,score,lower_bound,upper_bound,instances
+q0,1,obj-4,7.000000,2.000000,9.000000,1
+q0,2,obj-1,6.000000,2.000000,9.000000,1
+q0,3,obj-0,4.000000,1.000000,8.000000,1

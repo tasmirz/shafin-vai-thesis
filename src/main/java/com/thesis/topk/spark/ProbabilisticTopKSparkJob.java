@@ -35,6 +35,7 @@ public final class ProbabilisticTopKSparkJob {
     String sparkMaster = parsed.stringValue("sparkMaster", "local[*]");
     boolean validateExact = parsed.booleanValue("validateExact", false);
     int traceLimit = parsed.intValue("traceLimit", 25);
+    String resultsFile = parsed.stringValue("resultsFile", null);
     PtdAlgorithm algorithm = PtdAlgorithmRegistry.require(
         parsed.stringValue("algorithm", PtdAlgorithmRegistry.DEFAULT_ID));
 
@@ -63,6 +64,9 @@ public final class ProbabilisticTopKSparkJob {
           traceLimit);
       printReport(dataset, source, k, partitions, algorithm, boundMode, synopsis, result,
           Duration.between(start, Instant.now()));
+      if (resultsFile != null) {
+        saveResultsToFile(resultsFile, result);
+      }
     }
   }
 
@@ -234,6 +238,28 @@ public final class ProbabilisticTopKSparkJob {
             trace.baselineEmissions(),
             trace.aesEmissions());
       }
+    }
+  }
+
+  private static void saveResultsToFile(String filePath, SparkTopKEngine.SparkRunResult result) {
+    try (java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.FileWriter(filePath))) {
+      writer.println("query_id,rank,object_id,score,lower_bound,upper_bound,instances");
+      for (SparkTopKEngine.QueryRanking ranking : result.rankings()) {
+        int rank = 1;
+        for (CandidateScore score : ranking.topK()) {
+          writer.printf("%s,%d,%s,%.6f,%.6f,%.6f,%d%n",
+              ranking.queryId(),
+              rank++,
+              score.objectId(),
+              score.exactScore(),
+              score.lowerBound(),
+              score.upperBound(),
+              score.instanceCount());
+        }
+      }
+      System.out.println("Saved Top-K results to: " + filePath);
+    } catch (java.io.IOException e) {
+      System.err.println("Failed to write results file: " + e.getMessage());
     }
   }
 }

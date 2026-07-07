@@ -181,6 +181,71 @@ def parse_metrics(spark_log, algorithm_log, summary_path):
   }
 
 
+def parse_topk_results(spark_log):
+  query_header_regex = re.compile(r"(?:query=|queryId=)([A-Za-z0-9._-]+)", re.IGNORECASE)
+  rank_regex = re.compile(r"^\s*rank\s+object=([^\s]+)\s+score=([^\s]+)\s+lb=([^\s]+)\s+ub=([^\s]+)\s+instances=(\d+)", re.IGNORECASE)
+  candidate_score_regex = re.compile(r"CandidateScore\s*\{\s*objectId\s*=\s*'([^']*)'\s*,\s*queryId\s*=\s*'([^']*)'\s*,\s*exactScore\s*=\s*([^,]*)\s*,\s*lowerBound\s*=\s*([^,]*)\s*,\s*upperBound\s*=\s*([^,]*)\s*,\s*instanceCount\s*=\s*(\d+)", re.IGNORECASE)
+
+  queries = []
+  query_map = {}
+  current_query_id = "Default Query"
+
+  for line in spark_log.splitlines():
+    if "TopKResult" in line or line.startswith("query="):
+      match = query_header_regex.search(line)
+      if match:
+        current_query_id = match.group(1)
+
+    rank_match = rank_regex.search(line)
+    if rank_match:
+      object_id = rank_match.group(1)
+      score = float(rank_match.group(2))
+      lb = float(rank_match.group(3))
+      ub = float(rank_match.group(4))
+      instances = int(rank_match.group(5))
+
+      if current_query_id not in query_map:
+        query_map[current_query_id] = {"queryId": current_query_id, "ranks": []}
+        queries.append(query_map[current_query_id])
+
+      if not any(r["objectId"] == object_id for r in query_map[current_query_id]["ranks"]):
+        query_map[current_query_id]["ranks"].append({
+          "objectId": object_id,
+          "score": score,
+          "lb": lb,
+          "ub": ub,
+          "instances": instances
+        })
+      continue
+
+    if "CandidateScore" in line:
+      for match in candidate_score_regex.finditer(line):
+        object_id = match.group(1)
+        q_id = match.group(2) or current_query_id
+        score = float(match.group(3))
+        lb = float(match.group(4))
+        ub = float(match.group(5))
+        instances = int(match.group(6))
+
+        if q_id not in query_map:
+          query_map[q_id] = {"queryId": q_id, "ranks": []}
+          queries.append(query_map[q_id])
+
+        if not any(r["objectId"] == object_id for r in query_map[q_id]["ranks"]):
+          query_map[q_id]["ranks"].append({
+            "objectId": object_id,
+            "score": score,
+            "lb": lb,
+            "ub": ub,
+            "instances": instances
+          })
+
+  for q in queries:
+    q["ranks"].sort(key=lambda x: x["score"], reverse=True)
+
+  return queries
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--run-id", required=True)
@@ -290,6 +355,32 @@ def main():
       writer.writeheader()
       writer.writerows(traces)
     manifest["artifacts"].append("object-traces.csv")
+
+  # Extract and save Top-K results
+  topk_results = parse_topk_results(spark_log)
+  if topk_results:
+    (run_dir / "topk-results.json").write_text(json.dumps(topk_results, indent=2, allow_nan=False) + "\n")
+    manifest["artifacts"].append("topk-results.json")
+    
+    with (run_dir / "topk-results.csv").open("w", newline="") as target:
+      writer = csv.DictWriter(target, fieldnames=[
+          "query_id", "rank", "object_id", "score", "lower_bound", "upper_bound", "instances"])
+      writer.writeheader()
+      for q in topk_results:
+        q_id = q["queryId"]
+        for idx, rank_entry in enumerate(q["ranks"]):
+          writer.writerow({
+              "query_id": q_id,
+              "rank": idx + 1,
+              "object_id": rank_entry["objectId"],
+              "score": rank_entry["score"],
+              "lower_bound": rank_entry["lb"],
+              "upper_bound": rank_entry["ub"],
+              "instances": rank_entry["instances"]
+          })
+    manifest["artifacts"].append("topk-results.csv")
+    print(f"savedTopKResults={run_dir.relative_to(ROOT)}/topk-results.csv")
+
   (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
   print(f"savedRun={run_dir.relative_to(ROOT)}")
 

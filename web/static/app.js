@@ -393,6 +393,75 @@ function renderPipeline(active = 0) {
   document.querySelectorAll("[data-stage]").forEach(button => button.addEventListener("click", () => renderPipeline(Number(button.dataset.stage))));
 }
 
+function parseTopKFromLog(logText) {
+  if (!logText) return [];
+  const lines = logText.split('\n');
+  const queries = [];
+  const queryMap = {};
+
+  const queryHeaderRegex = /(?:query=|queryId=)([A-Za-z0-9._-]+)/i;
+  const rankRegex = /^\s*rank\s+object=([^\s]+)\s+score=([^\s]+)\s+lb=([^\s]+)\s+ub=([^\s]+)\s+instances=(\d+)/i;
+  const candidateScoreRegex = /CandidateScore\s*\{\s*objectId\s*=\s*'([^']*)'\s*,\s*queryId\s*=\s*'([^']*)'\s*,\s*exactScore\s*=\s*([^,]*)\s*,\s*lowerBound\s*=\s*([^,]*)\s*,\s*upperBound\s*=\s*([^,]*)\s*,\s*instanceCount\s*=\s*(\d+)/i;
+
+  let currentQueryId = "Default Query";
+
+  for (let line of lines) {
+    if (line.includes('TopKResult') || line.startsWith('query=')) {
+      const match = line.match(queryHeaderRegex);
+      if (match) {
+        currentQueryId = match[1];
+      }
+    }
+
+    const rankMatch = line.match(rankRegex);
+    if (rankMatch) {
+      const objectId = rankMatch[1];
+      const score = parseFloat(rankMatch[2]);
+      const lb = parseFloat(rankMatch[3]);
+      const ub = parseFloat(rankMatch[4]);
+      const instances = parseInt(rankMatch[5], 10);
+
+      if (!queryMap[currentQueryId]) {
+        queryMap[currentQueryId] = { queryId: currentQueryId, ranks: [] };
+        queries.push(queryMap[currentQueryId]);
+      }
+
+      if (!queryMap[currentQueryId].ranks.some(r => r.objectId === objectId)) {
+        queryMap[currentQueryId].ranks.push({ objectId, score, lb, ub, instances });
+      }
+      continue;
+    }
+
+    if (line.includes('CandidateScore')) {
+      let match;
+      const globalRegex = new RegExp(candidateScoreRegex.source, 'gi');
+      while ((match = globalRegex.exec(line)) !== null) {
+        const objectId = match[1];
+        const qId = match[2] || currentQueryId;
+        const score = parseFloat(match[3]);
+        const lb = parseFloat(match[4]);
+        const ub = parseFloat(match[5]);
+        const instances = parseInt(match[6], 10);
+
+        if (!queryMap[qId]) {
+          queryMap[qId] = { queryId: qId, ranks: [] };
+          queries.push(queryMap[qId]);
+        }
+
+        if (!queryMap[qId].ranks.some(r => r.objectId === objectId)) {
+          queryMap[qId].ranks.push({ objectId, score, lb, ub, instances });
+        }
+      }
+    }
+  }
+
+  for (let q of queries) {
+    q.ranks.sort((a, b) => b.score - a.score);
+  }
+
+  return queries;
+}
+
 function renderJobs() {
   const element = document.getElementById("job-console");
   if (!state.jobs.length) {
@@ -401,11 +470,101 @@ function renderJobs() {
     return;
   }
   element.className = "";
-  element.innerHTML = state.jobs.map(job => `<article class="job-entry">
-    <div class="job-row"><div><strong>${escapeHtml(job.runId)}</strong> <span class="badge ${job.mode === "stream" ? "teal" : ""}">${escapeHtml(job.mode)}</span></div>
-    <span class="status-pill ${job.status === "failed" ? "failed" : ""}">${escapeHtml(job.status)}</span></div>
-    ${job.log ? `<pre>${escapeHtml(job.log)}</pre>` : ""}
-  </article>`).join("");
+  element.innerHTML = state.jobs.map(job => {
+    if (!state.selectedTabs) {
+      state.selectedTabs = {};
+    }
+    const selectedTab = state.selectedTabs[job.jobId] || 'log';
+    const parsedQueries = parseTopKFromLog(job.log);
+    const hasResults = parsedQueries.length > 0 && parsedQueries.some(q => q.ranks.length > 0);
+
+    const tabHtml = `
+      <div class="job-tabs">
+        <button class="tab-btn ${selectedTab === 'log' ? 'active' : ''}" data-job-id="${job.jobId}" data-tab="log">Live Console</button>
+        <button class="tab-btn ${selectedTab === 'topk' ? 'active' : ''}" data-job-id="${job.jobId}" data-tab="topk">Top-K Results</button>
+      </div>
+    `;
+
+    let contentHtml = "";
+    if (selectedTab === 'log') {
+      contentHtml = job.log ? `<pre class="console-log">${escapeHtml(job.log)}</pre>` : `<div class="empty-log">Waiting for execution output...</div>`;
+    } else {
+      if (hasResults) {
+        contentHtml = parsedQueries.map(query => {
+          if (query.ranks.length === 0) return '';
+          return `
+            <div class="topk-query-section">
+              <h4>Query: ${escapeHtml(query.queryId)}</h4>
+              <div class="scroll-table">
+                <table class="table topk-results-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Object ID</th>
+                      <th>Dominance Score</th>
+                      <th>Lower Bound</th>
+                      <th>Upper Bound</th>
+                      <th>Instances</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${query.ranks.map((rank, idx) => `
+                      <tr>
+                        <td><strong>${idx + 1}</strong></td>
+                        <td><span class="object-id-badge">${escapeHtml(rank.objectId)}</span></td>
+                        <td><strong>${rank.score.toFixed(6)}</strong></td>
+                        <td>${rank.lb.toFixed(6)}</td>
+                        <td>${rank.ub.toFixed(6)}</td>
+                        <td>${rank.instances}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        if (job.status === 'running') {
+          contentHtml = `<div class="empty-log">Job is running... waiting for Top-K results to be printed.</div>`;
+        } else if (job.status === 'completed') {
+          contentHtml = `<div class="empty-log">Job completed, but no Top-K results were found in the console logs.</div>`;
+        } else {
+          contentHtml = `<div class="empty-log">Job ${job.status}. No Top-K results available.</div>`;
+        }
+      }
+    }
+
+    return `
+      <article class="job-entry">
+        <div class="job-row">
+          <div>
+            <strong>${escapeHtml(job.runId)}</strong> 
+            <span class="badge ${job.mode === "stream" ? "teal" : ""}">${escapeHtml(job.mode)}</span>
+          </div>
+          <div class="job-right">
+            ${tabHtml}
+            <span class="status-pill ${job.status === "failed" ? "failed" : ""}">${escapeHtml(job.status)}</span>
+          </div>
+        </div>
+        <div class="job-content-container">
+          ${contentHtml}
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  element.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.onclick = (e) => {
+      const jobId = e.target.dataset.jobId;
+      const tab = e.target.dataset.tab;
+      if (!state.selectedTabs) {
+        state.selectedTabs = {};
+      }
+      state.selectedTabs[jobId] = tab;
+      renderJobs();
+    };
+  });
 }
 
 async function compareSelected() {
@@ -449,6 +608,48 @@ async function showRun(runId) {
       ${spark.queries.map(query => `<tr><td>${escapeHtml(query.queryId)}</td><td>${query.pruned} / ${query.objects}</td><td>${hasDscp(spark.algorithm) ? escapeHtml(query.tau) : "index frontier"}</td><td>${query.emittedRecords ?? query.compactShuffleRecords}</td><td>${percent(query.aer)}</td><td>${query.falsePrunes ?? 0}</td></tr>`).join("")}
       </tbody></table>
     </div>
+    ${(() => {
+      const topkLogs = run.logs && run.logs["spark.log"];
+      const parsedQueries = parseTopKFromLog(topkLogs);
+      if (parsedQueries.length === 0 || !parsedQueries.some(q => q.ranks.length > 0)) {
+        return "";
+      }
+      return `
+        <div class="detail-section">
+          <h4>Top-K Results</h4>
+          ${parsedQueries.map(query => {
+            if (query.ranks.length === 0) return '';
+            return `
+              <div style="margin-top: 10px; margin-bottom: 15px;">
+                <strong style="color: var(--teal); font-size: 13px;">Query: ${escapeHtml(query.queryId)}</strong>
+                <table class="table" style="margin-top: 5px;">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Object ID</th>
+                      <th>Score</th>
+                      <th>Bounds [lb, ub]</th>
+                      <th>Instances</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${query.ranks.map((rank, idx) => `
+                      <tr>
+                        <td><strong>${idx + 1}</strong></td>
+                        <td><span class="object-id-badge">${escapeHtml(rank.objectId)}</span></td>
+                        <td><strong>${rank.score.toFixed(6)}</strong></td>
+                        <td style="font-size: 11px;">[${rank.lb.toFixed(4)}, ${rank.ub.toFixed(4)}]</td>
+                        <td>${rank.instances}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    })()}
     <div class="detail-section"><h4>Validation</h4><p class="callout ${run.summary.exactAgreement === true ? "info" : "warning"}">
       Exact top-k agreement: ${escapeHtml(validationDisplay(run.summary.exactAgreement)[0])}. Queries checked: ${escapeHtml(run.metrics.validation.queriesChecked)}.
     </p></div>

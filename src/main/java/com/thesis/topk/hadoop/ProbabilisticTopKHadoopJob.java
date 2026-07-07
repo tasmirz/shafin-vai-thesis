@@ -89,11 +89,12 @@ public final class ProbabilisticTopKHadoopJob {
     FileInputFormat.addInputPath(job, new Path(input));
     FileOutputFormat.setOutputPath(job, outputPath);
 
+    String resultsFile = parsed.stringValue("resultsFile", null);
     if (!job.waitForCompletion(true)) {
       throw new IllegalStateException("Hadoop PTD job failed");
     }
     printOutput(conf, outputPath, algorithm, k, partitions, validateExact,
-        Duration.between(start, Instant.now()));
+        Duration.between(start, Instant.now()), resultsFile);
   }
 
   private static String readHeader(Configuration conf, Path input) throws IOException {
@@ -119,7 +120,8 @@ public final class ProbabilisticTopKHadoopJob {
       int k,
       int partitions,
       boolean validateExact,
-      Duration elapsed) throws IOException {
+      Duration elapsed,
+      String resultsFile) throws IOException {
     FileSystem fs = output.getFileSystem(conf);
     List<String> rows = new ArrayList<>();
     for (var status : fs.listStatus(output, path -> path.getName().startsWith("part-"))) {
@@ -171,6 +173,19 @@ public final class ProbabilisticTopKHadoopJob {
           metric.partialMbrRefs, metric.filterMs, metric.emissionMs, metric.refineMs,
           metric.shuffleRecords, metric.shuffleBytes, 1, algorithmMs, 0, 1.0,
           validateExact, metric.exactAgreement);
+      if (metric.topK != null) {
+        for (CandidateScore score : metric.topK) {
+          System.out.printf("  rank object=%s score=%.6f lb=%.6f ub=%.6f instances=%d%n",
+              score.objectId(),
+              score.exactScore(),
+              score.lowerBound(),
+              score.upperBound(),
+              score.instanceCount());
+        }
+      }
+    }
+    if (resultsFile != null) {
+      saveResultsToFile(resultsFile, metrics);
     }
   }
 
@@ -499,6 +514,7 @@ public final class ProbabilisticTopKHadoopJob {
       metrics.shuffleRecords = emittedRecords;
       metrics.shuffleBytes = shuffleBytes;
       metrics.exactAgreement = exactAgreement;
+      metrics.topK = topK;
       return metrics;
     }
 
@@ -640,6 +656,7 @@ public final class ProbabilisticTopKHadoopJob {
     public long shuffleRecords;
     public long shuffleBytes;
     public boolean exactAgreement;
+    public List<CandidateScore> topK;
   }
 
   public record CandidateEnvelope(
@@ -677,5 +694,28 @@ public final class ProbabilisticTopKHadoopJob {
     }
     String value = cells[index].trim();
     return value.isEmpty() ? defaultValue : value;
+  }
+
+  private static void saveResultsToFile(String filePath, List<QueryMetrics> metricsList) {
+    try (java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.FileWriter(filePath))) {
+      writer.println("query_id,rank,object_id,score,lower_bound,upper_bound,instances");
+      for (QueryMetrics metric : metricsList) {
+        if (metric.topK == null) continue;
+        int rank = 1;
+        for (CandidateScore score : metric.topK) {
+          writer.printf("%s,%d,%s,%.6f,%.6f,%.6f,%d%n",
+              metric.queryId,
+              rank++,
+              score.objectId(),
+              score.exactScore(),
+              score.lowerBound(),
+              score.upperBound(),
+              score.instanceCount());
+        }
+      }
+      System.out.println("Saved Top-K results to: " + filePath);
+    } catch (IOException e) {
+      System.err.println("Failed to write results file: " + e.getMessage());
+    }
   }
 }
